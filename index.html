@@ -113,6 +113,7 @@
 <div id="root"></div>
 
 <script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="backup.js"></script>
 <script>
 "use strict";
 
@@ -124,7 +125,7 @@
    κλειδί OpenRouter (χωρίς κάρτα), όπως στο Identify-AI.
    ========================================================================= */
 
-const APP_VERSION = "1.6.0";
+const APP_VERSION = "1.7.0";
 const DEFAULT_PIN = "1111";
 const DEFAULT_MODEL = ""; // κενό = αυτόματη εύρεση δωρεάν μοντέλου με εικόνα
 const MODEL_LIST_CACHE_KEY = "tim_free_vision_models";
@@ -836,6 +837,11 @@ function renderSettingsScreen(){
     <button class="btn secondary" data-act="export-excel">Εξαγωγή τιμολογίων για τον λογιστή</button>
   </div>
   <div class="card">
+    <h2>Αντίγραφα ασφαλείας</h2>
+    <p class="muted">Ξεχωριστό από τον κοινό φάκελο ζωντανών δεδομένων — πλήρες στιγμιότυπο όλων των τιμολογίων, πληρωμών και ρυθμίσεων, με πολλαπλούς προορισμούς και επαναφορά.</p>
+    ${typeof BackupModule!=="undefined" ? BackupModule.renderButton() : `<div class="muted">Το άρθρωμα αντιγράφων δεν φορτώθηκε.</div>`}
+  </div>
+  <div class="card">
     <h2>Έκδοση</h2>
     <div class="muted">Έκδοση ${APP_VERSION}</div>
     <div style="height:8px"></div>
@@ -1533,6 +1539,31 @@ function migrateConfig(){
   }
 }
 
+if(typeof BackupModule !== "undefined"){
+  BackupModule.init({
+    appName: "Timologia",
+    appTitle: "Τιμολόγια Προμηθευτών",
+    getData: ()=>({
+      invoices: allInvoices(),
+      payments: allPayments(),
+      config: state.config
+    }),
+    applyData: async (data)=>{
+      state.invoices = data.invoices || [];
+      state.payments = data.payments || [];
+      if(data.config) state.config = Object.assign(state.config, data.config);
+      LS.set("tim_invoices_local", state.invoices);
+      LS.set("tim_payments_local", state.payments);
+      persistLocal();
+      if(folderReady){
+        for(const inv of state.invoices){ try{ await writeJsonFile(invDirHandle, inv.id+".json", inv); }catch(e){} }
+        for(const p of state.payments){ try{ await writeJsonFile(payDirHandle, p.id+".json", p); }catch(e){} }
+        await writeConfigFile(state.config);
+      }
+    }
+  });
+}
+
 async function boot(){
   migrateConfig();
   applyTheme();
@@ -1540,6 +1571,7 @@ async function boot(){
   if(folderReady) await syncFromFolder();
   applyTheme();
   render();
+  if(typeof BackupModule !== "undefined"){ BackupModule.checkAutoBackupDue(); }
   // Περιοδικό ανανέωση για να φαίνονται τιμολόγια που πρόσθεσε άλλη συσκευή
   // μέσω του συγχρονισμού του Google Drive.
   setInterval(async ()=>{
