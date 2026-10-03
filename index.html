@@ -125,13 +125,10 @@
 
 const APP_VERSION = "1.1.0";
 const DEFAULT_PIN = "1111";
-const DEFAULT_MODEL = "openrouter/free:free";
-const FALLBACK_MODELS = [
-  "openrouter/free:free",
-  "qwen/qwen2.5-vl-72b-instruct:free",
-  "meta-llama/llama-3.2-11b-vision-instruct:free",
-  "google/gemini-2.0-flash-exp:free"
-];
+const DEFAULT_MODEL = ""; // κενό = αυτόματη εύρεση δωρεάν μοντέλου με εικόνα
+const MODEL_LIST_CACHE_KEY = "tim_free_vision_models";
+const MODEL_LIST_MAX_AGE = 12 * 60 * 60 * 1000; // 12 ώρες
+const MODEL_TIMEOUT_MS = 22000;
 
 /* ---------------------------- Εμφάνιση (θέμα) ---------------------------- */
 
@@ -487,22 +484,63 @@ async function callOpenRouterVision(dataUrl, apiKey, model){
     }],
     temperature: 0.1
   };
-  const resp = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Authorization": "Bearer " + apiKey,
-      "Content-Type": "application/json",
-      "X-Title": "Invoice-Tracker-App"
-    },
-    body: JSON.stringify(body)
-  });
-  if(!resp.ok){
-    const t = await resp.text().catch(()=>"");
-    throw new Error("HTTP " + resp.status + " " + t.slice(0,200));
+  const controller = new AbortController();
+  const timer = setTimeout(()=>controller.abort(), MODEL_TIMEOUT_MS);
+  try{
+    const resp = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": "Bearer " + apiKey,
+        "Content-Type": "application/json",
+        "X-Title": "Invoice-Tracker-App"
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal
+    });
+    if(!resp.ok){
+      const t = await resp.text().catch(()=>"");
+      throw new Error("HTTP " + resp.status + " " + t.slice(0,200));
+    }
+    const data = await resp.json();
+    const text = data?.choices?.[0]?.message?.content || "";
+    return text;
+  } finally {
+    clearTimeout(timer);
   }
+}
+
+/* Βρίσκει, ζωντανά από την OpenRouter, ποια δωρεάν μοντέλα δέχονται εικόνα
+   αυτή τη στιγμή (η λίστα τους αλλάζει συχνά) — και τα κρατά σε cache 12 ώρες. */
+async function getFreeVisionModels(){
+  try{
+    const cached = LS.get(MODEL_LIST_CACHE_KEY, null);
+    if(cached && (Date.now() - cached.ts) < MODEL_LIST_MAX_AGE && cached.models?.length){
+      return cached.models;
+    }
+  }catch(e){}
+  const resp = await fetch("https://openrouter.ai/api/v1/models");
+  if(!resp.ok) throw new Error("Δεν ήταν δυνατή η λήψη της λίστας μοντέλων (HTTP " + resp.status + ").");
   const data = await resp.json();
-  const text = data?.choices?.[0]?.message?.content || "";
-  return text;
+  const list = (data?.data || []).filter(m=>{
+    if(!m.id || !m.id.endsWith(":free")) return false;
+    const arch = m.architecture || {};
+    const mods = arch.input_modalities || [];
+    const modalityStr = arch.modality || "";
+    return mods.includes("image") || modalityStr.includes("image");
+  }).map(m=>m.id);
+  LS.set(MODEL_LIST_CACHE_KEY, {ts: Date.now(), models: list});
+  return list;
+}
+
+async function candidateModels(){
+  const list = [];
+  if(state.config.model) list.push(state.config.model);          // χειροκίνητη ρύθμιση, αν υπάρχει
+  if(state.config.lastWorkingModel) list.push(state.config.lastWorkingModel); // ό,τι δούλεψε τελευταία φορά
+  try{
+    const live = await getFreeVisionModels();
+    for(const id of live) if(!list.includes(id)) list.push(id);
+  }catch(e){ /* αν αποτύχει η λίστα, συνεχίζουμε μόνο με όσα ήδη έχουμε */ }
+  return list;
 }
 
 function parseJsonLoose(text){
@@ -514,18 +552,25 @@ function parseJsonLoose(text){
   return JSON.parse(t);
 }
 
-async function extractInvoiceData(file){
+async function extractInvoiceData(file, onProgress){
   const apiKey = state.config.apiKey;
   if(!apiKey) throw new Error("NO_API_KEY");
   const dataUrl = await fileToDataUrl(file);
-  const modelsToTry = [state.config.model].concat(FALLBACK_MODELS.filter(m=>m!==state.config.model));
+  const modelsToTry = await candidateModels();
+  if(!modelsToTry.length) throw new Error("Δεν βρέθηκε αυτή τη στιγμή κανένα δωρεάν μοντέλο με υποστήριξη εικόνας στην OpenRouter. Δοκίμασε ξανά σε λίγο.");
   let lastErr = null;
-  for(const model of modelsToTry){
+  for(let i=0;i<modelsToTry.length;i++){
+    const model = modelsToTry[i];
+    if(onProgress) onProgress(i+1, modelsToTry.length);
     try{
       const text = await callOpenRouterVision(dataUrl, apiKey, model);
       const parsed = parseJsonLoose(text);
+      state.config.lastWorkingModel = model;
+      persistLocal();
       return {parsed, dataUrl, modelUsed: model};
-    }catch(e){ lastErr = e; }
+    }catch(e){
+      lastErr = (e && e.name === "AbortError") ? new Error("Το μοντέλο «" + model + "» άργησε πολύ και ακυρώθηκε.") : e;
+    }
   }
   throw lastErr || new Error("Αποτυχία εξαγωγής δεδομένων.");
 }
@@ -713,10 +758,13 @@ function renderSettingsScreen(){
     <p class="muted">Δωρεάν κλειδί, χωρίς κάρτα — από <a class="linklike" href="https://openrouter.ai/keys" target="_blank">openrouter.ai/keys</a>.</p>
     <label>Κλειδί API</label>
     <input id="f-apikey" type="text" value="${escapeHtml(cfg.apiKey||"")}" placeholder="sk-or-v1-...">
-    <label>Μοντέλο (προχωρημένο, προαιρετικό)</label>
-    <input id="f-model" type="text" value="${escapeHtml(cfg.model||DEFAULT_MODEL)}">
+    <p class="muted" style="margin-top:10px;">Η εφαρμογή βρίσκει μόνη της, κάθε φορά, ποιο δωρεάν μοντέλο με υποστήριξη εικόνας είναι αυτή τη στιγμή διαθέσιμο στην OpenRouter (η λίστα τους αλλάζει συχνά) και τα δοκιμάζει ένα-ένα.</p>
+    <label>Συγκεκριμένο μοντέλο (προχωρημένο, προαιρετικό — άσε το κενό για αυτόματη εύρεση)</label>
+    <input id="f-model" type="text" value="${escapeHtml(cfg.model||"")}" placeholder="π.χ. qwen/qwen2.5-vl-72b-instruct:free">
     <div style="height:10px"></div>
     <button class="btn secondary" data-act="save-ai">Αποθήκευση</button>
+    <div style="height:8px"></div>
+    <button class="btn secondary small" data-act="test-models">Έλεγχος διαθέσιμων δωρεάν μοντέλων</button>
   </div>
   <div class="card">
     <h2>Συντελεστές ΦΠΑ</h2>
@@ -797,7 +845,8 @@ function sheetAddInvoiceHtml(s){
     <button class="btn secondary" data-act="close-sheet">Άκυρο</button>`;
   }
   if(s.step === "loading"){
-    return `<div class="loader"><div class="spin"></div><div>Ανάλυση τιμολογίου με τεχνητή νοημοσύνη…</div></div>`;
+    const prog = s.progress ? `<div class="muted">Δοκιμή δωρεάν μοντέλου ${s.progress.i} από ${s.progress.n}…</div>` : "";
+    return `<div class="loader"><div class="spin"></div><div>Ανάλυση τιμολογίου με τεχνητή νοημοσύνη…</div>${prog}</div>`;
   }
   if(s.step === "error"){
     return `
@@ -973,7 +1022,7 @@ async function handleAction(act, el){
       render(); break;
     case "save-ai":
       state.config.apiKey = document.getElementById("f-apikey").value.trim();
-      state.config.model = document.getElementById("f-model").value.trim() || DEFAULT_MODEL;
+      state.config.model = document.getElementById("f-model").value.trim();
       persistLocal(); await writeConfigFile(state.config); toast("Αποθηκεύτηκε."); break;
     case "add-vat":
       {
@@ -1019,6 +1068,14 @@ async function handleAction(act, el){
         persistLocal(); await writeConfigFile(state.config);
         applyTheme(); toast("Η εμφάνιση αποθηκεύτηκε.");
       } break;
+    case "test-models":
+      toast("Ψάχνω διαθέσιμα δωρεάν μοντέλα…");
+      try{
+        LS.set(MODEL_LIST_CACHE_KEY, null); // αγνόησε παλιά cache, θέλουμε φρέσκο έλεγχο
+        const live = await getFreeVisionModels();
+        toast(live.length ? ("Βρέθηκαν " + live.length + " δωρεάν μοντέλα με εικόνα. Πρώτο: " + live[0]) : "Δεν βρέθηκε κανένα αυτή τη στιγμή.");
+      }catch(e){ toast("Αποτυχία ελέγχου: " + (e.message||e)); }
+      break;
     case "export-excel": exportInvoicesToExcel(); break;
     case "check-update": location.href = location.pathname + "?v=" + Date.now(); break;
     case "manual-entry":
@@ -1043,7 +1100,9 @@ async function onFileChosen(file){
   render();
   try{
     const dataUrl = await fileToDataUrl(file);
-    const {parsed} = await extractInvoiceData(file);
+    const {parsed} = await extractInvoiceData(file, (i,n)=>{
+      if(state.sheet && state.sheet.step==="loading"){ state.sheet.progress = {i,n}; render(); }
+    });
     state.sheet.extracted = parsed;
     state.sheet.dataUrl = dataUrl;
     state.sheet.step = "confirm";
