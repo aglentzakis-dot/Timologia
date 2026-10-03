@@ -462,6 +462,34 @@ async function fileToDataUrl(file){
   });
 }
 
+/* Σμικρύνει τη φωτογραφία πριν τη στείλουμε στο AI — οι φωτογραφίες κινητού
+   είναι συνήθως πολύ μεγαλύτερες απ' ό,τι χρειάζεται, κάνουν την ανάλυση αργή
+   και κάποιες φορές την κάνουν να αποτυγχάνει. Κρατάει όλο το τιμολόγιο ορατό,
+   απλά σε μικρότερο μέγεθος αρχείου. */
+async function resizeImageDataUrl(file, maxDim, quality){
+  maxDim = maxDim || 1600;
+  quality = quality || 0.82;
+  const original = await fileToDataUrl(file);
+  try{
+    const img = await new Promise((resolve,reject)=>{
+      const im = new Image();
+      im.onload = ()=>resolve(im);
+      im.onerror = reject;
+      im.src = original;
+    });
+    const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+    if(scale >= 1) return original; // ήδη αρκετά μικρή
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(img.width * scale);
+    canvas.height = Math.round(img.height * scale);
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/jpeg", quality);
+  }catch(e){
+    return original; // αν κάτι πάει στραβά, στέλνουμε την αρχική
+  }
+}
+
 const EXTRACTION_PROMPT = `Σου δίνω φωτογραφία ενός τιμολογίου ή μιας απόδειξης προμηθευτή.
 Διάβασέ το προσεκτικά και απάντησε ΜΟΝΟ με ένα JSON αντικείμενο, χωρίς καθόλου άλλο κείμενο, με ακριβώς αυτά τα πεδία:
 {
@@ -567,7 +595,7 @@ function parseJsonLoose(text){
 async function extractInvoiceData(file, onProgress){
   const apiKey = state.config.apiKey;
   if(!apiKey) throw new Error("NO_API_KEY");
-  const dataUrl = await fileToDataUrl(file);
+  const dataUrl = await resizeImageDataUrl(file);
   const modelsToTry = await candidateModels();
   if(!modelsToTry.length) throw new Error("Δεν βρέθηκε αυτή τη στιγμή κανένα δωρεάν μοντέλο με υποστήριξη εικόνας στην OpenRouter. Δοκίμασε ξανά σε λίγο.");
   let lastErr = null;
@@ -835,7 +863,7 @@ function renderReorderList(items, kind){
 
 function openAddInvoiceSheet(){
   state.sheet = {type:"add-invoice", step:"capture", file:null, extracted:null, dataUrl:null,
-    queue:[], index:0, mode:"single", savedCount:0};
+    queue:[], index:0, mode:"single", savedCount:0, results:[]};
   render();
 }
 
@@ -862,8 +890,72 @@ function sheetAddInvoiceHtml(s){
   }
   if(s.step === "loading"){
     const prog = s.progress ? `<div class="muted">Δοκιμή μοντέλου ${s.progress.i}/${s.progress.n}: ${escapeHtml(s.progress.model||"")}</div>` : "";
-    const bulk = (s.mode==="bulk") ? `<div class="muted" style="margin-bottom:4px;">Φωτογραφία ${s.index+1} από ${s.queue.length}</div>` : "";
-    return `<div class="loader"><div class="spin"></div>${bulk}<div>Ανάλυση τιμολογίου με τεχνητή νοημοσύνη…</div>${prog}</div>`;
+    return `<div class="loader"><div class="spin"></div><div>Ανάλυση τιμολογίου με τεχνητή νοημοσύνη…</div>${prog}</div>`;
+  }
+  if(s.step === "processing"){
+    const prog = s.progress ? `<div class="muted">Δοκιμή μοντέλου: ${escapeHtml(s.progress.model||"")}</div>` : "";
+    return `
+    <h2>Ανάλυση φωτογραφιών</h2>
+    <div class="loader">
+      <div class="spin"></div>
+      <div>Φωτογραφία ${s.index+1} από ${s.results.length}…</div>
+      ${prog}
+      <div class="muted" style="margin-top:6px;">Διαβάζονται όλες πρώτα· μετά θα τις δεις μαζί για να διαλέξεις μετρητοίς/επί πιστώσει.</div>
+    </div>`;
+  }
+  if(s.step === "review"){
+    const ok = s.results.filter(r=>r.extracted && !r.error).length;
+    const bad = s.results.length - ok;
+    let rows = "";
+    s.results.forEach((row,i)=>{
+      if(row.error || !row.extracted){
+        rows += `
+        <div class="card" style="margin-bottom:10px;">
+          <div class="badbox" style="margin-bottom:0;">Φωτογραφία ${i+1}: ${escapeHtml(row.error||"δεν αναλύθηκε")}</div>
+        </div>`;
+        return;
+      }
+      const d = row.extracted;
+      const dup = findPossibleDuplicate(d.supplierName, d.date, d.grossAmount);
+      rows += `
+      <div class="card" style="margin-bottom:10px;">
+        <div class="row" style="align-items:flex-start;">
+          ${row.dataUrl?`<img src="${row.dataUrl}" style="width:46px;height:46px;object-fit:cover;border-radius:8px;border:1px solid var(--line);flex-shrink:0;">`:""}
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);">
+            <input type="checkbox" id="r-include-${i}" ${row.include?"checked":""} style="width:auto;"> καταχώρηση
+          </label>
+        </div>
+        ${dup?`<div class="warnbox">Μοιάζει ήδη καταχωρημένο (${fmtDate(dup.date)}, ${fmtMoney(dup.grossAmount)}).</div>`:""}
+        <label>Προμηθευτής</label>
+        <input id="r-supplier-${i}" value="${escapeHtml(d.supplierName||"")}">
+        <div class="grid2">
+          <div><label>Ημερομηνία</label><input id="r-date-${i}" type="date" value="${escapeHtml(d.date||todayISO())}"></div>
+          <div><label>Σύνολο (€)</label><input id="r-gross-${i}" type="number" step="0.01" value="${d.grossAmount||""}"></div>
+        </div>
+        <div class="grid2">
+          <div><label>Καθαρή αξία (€)</label><input id="r-net-${i}" type="number" step="0.01" value="${d.netAmount||""}"></div>
+          <div><label>ΦΠΑ (€)</label><input id="r-vat-${i}" type="number" step="0.01" value="${d.vatAmount||""}"></div>
+        </div>
+        <label>Συντελεστής ΦΠΑ</label>
+        <select id="r-vatrate-${i}">
+          ${state.config.vatRates.map(r=>`<option value="${r}" ${Number(d.vatRate)===r?"selected":""}>${r}%</option>`).join("")}
+        </select>
+        <div style="background:#eef3ef;border:2px solid var(--accent);border-radius:10px;padding:8px 10px;margin-top:10px;">
+          <label style="font-weight:800;color:var(--accent);margin:0 0 4px;font-size:13px;">Τρόπος πληρωμής</label>
+          <select id="r-paytype-${i}" style="font-weight:700;">
+            <option value="μετρητοίς" ${(d.paymentType||"μετρητοίς")==="μετρητοίς"?"selected":""}>Μετρητοίς</option>
+            <option value="επί πιστώσει" ${d.paymentType==="επί πιστώσει"?"selected":""}>Επί πιστώσει</option>
+          </select>
+        </div>
+      </div>`;
+    });
+    return `
+    <h2>Επιβεβαίωση ${s.results.length} τιμολογίων</h2>
+    <p class="muted">${ok} αναλύθηκαν κανονικά${bad?(", "+bad+" απέτυχαν"):""}. Έλεγξε και διάλεξε μετρητοίς/επί πιστώσει για το καθένα, μετά αποθήκευσε όλα μαζί.</p>
+    ${rows}
+    <button class="btn" data-act="save-all-bulk">Αποθήκευση όλων</button>
+    <div style="height:8px"></div>
+    <button class="btn secondary" data-act="close-sheet">Άκυρο — τίποτα δεν αποθηκεύεται</button>`;
   }
   if(s.step === "error"){
     const hasMore = s.mode==="bulk" && (s.index < s.queue.length-1);
@@ -938,11 +1030,19 @@ function sheetAddInvoiceHtml(s){
 
 function sheetPaymentHtml(s){
   const supplier = suppliersSummary().find(x=>x.key===s.key);
+  const balance = supplier?.balance||0;
+  const recentInvoices = supplier ? [...supplier.invoices].reverse().slice(0,6) : [];
+  const chips = recentInvoices.map(inv=>
+    `<button class="staff-chip" type="button" data-act="pick-pay-amount" data-amount="${inv.grossAmount}">
+      ${fmtDate(inv.date)} · ${fmtMoney(inv.grossAmount)}
+    </button>`).join("");
   return `
   <h2>Πληρωμή — ${escapeHtml(supplier?.name||"")}</h2>
-  <div class="muted">Τρέχον υπόλοιπο: ${fmtMoney(supplier?.balance||0)}</div>
+  <div class="muted">Τρέχον υπόλοιπο: ${fmtMoney(balance)}</div>
   <label>Ποσό (€)</label>
-  <input id="f-pay-amount" type="number" step="0.01">
+  <input id="f-pay-amount" type="number" step="0.01" value="${balance>0.009 ? balance.toFixed(2) : ""}">
+  ${chips ? `<div class="muted" style="font-size:12px;margin-top:8px;">Ή πάτησε ένα τιμολόγιο για να συμπληρωθεί το ποσό του:</div>
+  <div style="margin-top:4px;">${chips}</div>` : ""}
   <label>Ημερομηνία</label>
   <input id="f-pay-date" type="date" value="${todayISO()}">
   <label>Σημείωση (προαιρετικό)</label>
@@ -1172,7 +1272,11 @@ async function handleAction(act, el){
         else { finishBulk(); }
       } break;
     case "save-invoice": await saveInvoiceFromForm(); break;
+    case "save-all-bulk": await saveAllBulk(); break;
     case "save-payment": await savePaymentFromForm(el.getAttribute("data-key")); break;
+    case "pick-pay-amount":
+      document.getElementById("f-pay-amount").value = Number(el.getAttribute("data-amount")).toFixed(2);
+      break;
   }
 }
 
@@ -1186,9 +1290,97 @@ async function onFilesChosen(files){
   if(!files || !files.length) return;
   state.sheet.queue = files;
   state.sheet.index = 0;
-  state.sheet.mode = files.length > 1 ? "bulk" : "single";
   state.sheet.savedCount = 0;
-  await startQueueItem(0);
+  if(files.length > 1){
+    state.sheet.mode = "bulk";
+    state.sheet.results = files.map(f=>({file:f, dataUrl:null, extracted:null, error:null,
+      include:true, paymentType:"μετρητοίς"}));
+    state.sheet.step = "processing";
+    render();
+    await processBulkAll();
+  } else {
+    state.sheet.mode = "single";
+    await startQueueItem(0);
+  }
+}
+
+/* Διαβάζει ΟΛΕΣ τις επιλεγμένες φωτογραφίες η μία μετά την άλλη, χωρίς να
+   σταματάει να περιμένει επιβεβαίωση στο ενδιάμεσο — μετά δείχνει μία λίστα
+   με όλα μαζί, όπου διαλέγεις μόνο μετρητοίς/επί πιστώσει ανά τιμολόγιο. */
+async function processBulkAll(){
+  const s = state.sheet;
+  if(!s) return;
+  for(let i=0;i<s.results.length;i++){
+    s.index = i;
+    s.progress = null;
+    render();
+    const row = s.results[i];
+    try{
+      const {parsed, dataUrl} = await extractInvoiceData(row.file, (a,b,model)=>{
+        if(state.sheet && state.sheet.step==="processing"){ state.sheet.progress = {i:a,n:b,model}; render(); }
+      });
+      row.extracted = parsed;
+      row.dataUrl = dataUrl;
+      row.include = true;
+    }catch(e){
+      console.error(e);
+      row.error = (e && e.message === "NO_API_KEY")
+        ? "Δεν έχει καταχωρηθεί κλειδί OpenRouter στις Ρυθμίσεις."
+        : ("Απέτυχε: " + (e && e.message ? e.message : "άγνωστο σφάλμα"));
+      row.include = false;
+    }
+  }
+  s.step = "review";
+  render();
+}
+
+async function saveAllBulk(){
+  const s = state.sheet;
+  if(!s) return;
+  let saved = 0;
+  for(let i=0;i<s.results.length;i++){
+    const row = s.results[i];
+    if(!row.extracted) continue;
+    const includeEl = document.getElementById("r-include-"+i);
+    if(includeEl && !includeEl.checked) continue;
+    const supplierEl = document.getElementById("r-supplier-"+i);
+    const dateEl = document.getElementById("r-date-"+i);
+    const grossEl = document.getElementById("r-gross-"+i);
+    const netEl = document.getElementById("r-net-"+i);
+    const vatEl = document.getElementById("r-vat-"+i);
+    const vatrateEl = document.getElementById("r-vatrate-"+i);
+    const paytypeEl = document.getElementById("r-paytype-"+i);
+    const supplierName = supplierEl ? supplierEl.value.trim() : (row.extracted.supplierName||"");
+    if(!supplierName) continue;
+    const inv = {
+      id: uid("inv"),
+      supplierName,
+      date: (dateEl ? dateEl.value : row.extracted.date) || todayISO(),
+      afm: row.extracted.afm||"",
+      phone: row.extracted.phone||"",
+      email: row.extracted.email||"",
+      address: row.extracted.address||"",
+      netAmount: Number(netEl ? netEl.value : row.extracted.netAmount)||0,
+      vatAmount: Number(vatEl ? vatEl.value : row.extracted.vatAmount)||0,
+      vatRate: Number(vatrateEl ? vatrateEl.value : row.extracted.vatRate)||0,
+      grossAmount: Number(grossEl ? grossEl.value : row.extracted.grossAmount)||0,
+      paymentType: paytypeEl ? paytypeEl.value : "μετρητοίς",
+      who: state.currentStaff || "",
+      createdAt: Date.now()
+    };
+    if(folderReady){
+      try{ await writeJsonFile(invDirHandle, inv.id + ".json", inv); }
+      catch(e){ console.error(e); state.invoices.push(inv); LS.set("tim_invoices_local", state.invoices); }
+      folderInvoices.push(inv);
+    } else {
+      state.invoices.push(inv); LS.set("tim_invoices_local", state.invoices);
+    }
+    saved++;
+  }
+  closeSheet();
+  state.screen = "home";
+  toast(saved ? ("Αποθηκεύτηκαν " + saved + " τιμολόγια.") : "Δεν αποθηκεύτηκε κανένα τιμολόγιο.");
+  render();
 }
 
 async function startQueueItem(idx){
