@@ -6,8 +6,9 @@
 <title>Τιμολόγια Προμηθευτών</title>
 <style>
   :root{
-    --bg:#f6f5f2; --panel:#ffffff; --ink:#1f2420; --muted:#6b756d;
+    --bg:#eef0f3; --panel:#ffffff; --ink:#1f2420; --muted:#6b756d;
     --line:#dfe2de; --accent:#2f6f4f; --accent-ink:#ffffff;
+    --navy:#162544; --navy-ink:#ffffff;
     --warn:#a6480f; --bad:#b3261e; --good:#2f6f4f; --radius:14px;
   }
   *{box-sizing:border-box;}
@@ -16,11 +17,18 @@
   body{padding-bottom:70px;}
   button{font-family:inherit;}
   h1,h2,h3{margin:0 0 8px 0;font-weight:700;}
-  .topbar{position:sticky;top:0;z-index:20;background:var(--panel);
-    border-bottom:1px solid var(--line);padding:12px 16px;display:flex;
-    align-items:center;justify-content:space-between;gap:8px;}
-  .topbar .title{font-size:17px;font-weight:700;}
-  .topbar .sub{font-size:12px;color:var(--muted);}
+  .topbar{position:sticky;top:0;z-index:20;background:var(--navy);
+    padding:12px 16px;display:flex;
+    align-items:center;justify-content:space-between;gap:10px;}
+  .topbar .identity{display:flex;align-items:center;gap:10px;}
+  .topbar .applogo{width:38px;height:38px;border-radius:11px;background:var(--accent);
+    display:flex;align-items:center;justify-content:center;font-size:19px;flex-shrink:0;}
+  .topbar .title{font-size:16px;font-weight:700;color:var(--navy-ink);line-height:1.25;}
+  .topbar .sub{font-size:11px;color:#b7c0d6;}
+  .topbar .actions{display:flex;gap:6px;}
+  .navicon{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.18);
+    color:var(--navy-ink);border-radius:10px;width:38px;height:38px;flex-shrink:0;
+    display:flex;align-items:center;justify-content:center;font-size:16px;cursor:pointer;padding:0;}
   .iconbtn{background:none;border:1px solid var(--line);border-radius:10px;
     padding:8px 10px;font-size:14px;color:var(--ink);cursor:pointer;}
   .wrap{max-width:720px;margin:0 auto;padding:14px 16px 24px;}
@@ -88,6 +96,16 @@
   .reorder-row .arrows button{border:none;background:none;cursor:pointer;color:var(--muted);font-size:13px;padding:0 4px;}
   .toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#1f2420;
     color:#fff;padding:10px 16px;border-radius:10px;font-size:13px;z-index:60;max-width:90%;text-align:center;}
+  .swatch-row{display:flex;gap:10px;margin-bottom:10px;}
+  .swatch{width:36px;height:36px;border-radius:10px;border:2px solid transparent;cursor:pointer;padding:0;
+    box-shadow:inset 0 0 0 1px rgba(0,0,0,.08);}
+  .swatch.sel{border-color:var(--ink);}
+  .stat-tiles{display:grid;grid-template-columns:1fr;gap:10px;}
+  .stat-tile{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:14px;}
+  .stat-tile .label{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px;margin-bottom:4px;}
+  .stat-tile .dot{width:8px;height:8px;border-radius:50%;background:var(--accent);display:inline-block;}
+  .stat-tile .val{font-size:24px;font-weight:700;}
 </style>
 </head>
 <body>
@@ -105,7 +123,7 @@
    κλειδί OpenRouter (χωρίς κάρτα), όπως στο Identify-AI.
    ========================================================================= */
 
-const APP_VERSION = "1.0.0";
+const APP_VERSION = "1.1.0";
 const DEFAULT_PIN = "1111";
 const DEFAULT_MODEL = "openrouter/free:free";
 const FALLBACK_MODELS = [
@@ -114,6 +132,50 @@ const FALLBACK_MODELS = [
   "meta-llama/llama-3.2-11b-vision-instruct:free",
   "google/gemini-2.0-flash-exp:free"
 ];
+
+/* ---------------------------- Εμφάνιση (θέμα) ---------------------------- */
+
+const THEME_PRESETS = [
+  {name:"Πράσινο",  accent:"#2f6f4f"},
+  {name:"Μπλε",     accent:"#2a5fa5"},
+  {name:"Καφέ",     accent:"#8a5a2b"},
+  {name:"Μελιτζανί",accent:"#6b3fa0"},
+  {name:"Κεραμιδί", accent:"#b5542a"}
+];
+const DEFAULT_THEME = {mode:"light", accent:"#2f6f4f"};
+
+function hexToRgb(hex){
+  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex||"");
+  if(!m) return {r:47,g:111,b:79};
+  return {r:parseInt(m[1],16), g:parseInt(m[2],16), b:parseInt(m[3],16)};
+}
+function shade(hex, pct){
+  const {r,g,b} = hexToRgb(hex);
+  const f = (c)=> Math.max(0, Math.min(255, Math.round(c + (pct<0? c*pct/100 : (255-c)*pct/100))));
+  return "#" + [f(r),f(g),f(b)].map(x=>x.toString(16).padStart(2,"0")).join("");
+}
+function applyTheme(){
+  const t = state.config.theme || DEFAULT_THEME;
+  const root = document.documentElement.style;
+  const accent = t.accent || DEFAULT_THEME.accent;
+  if(t.mode === "dark"){
+    root.setProperty("--bg", "#17191b");
+    root.setProperty("--panel", "#222527");
+    root.setProperty("--ink", "#eef0ee");
+    root.setProperty("--muted", "#9aa29c");
+    root.setProperty("--line", "#33373a");
+  } else {
+    root.setProperty("--bg", "#f6f5f2");
+    root.setProperty("--panel", "#ffffff");
+    root.setProperty("--ink", "#1f2420");
+    root.setProperty("--muted", "#6b756d");
+    root.setProperty("--line", "#dfe2de");
+  }
+  root.setProperty("--accent", accent);
+  root.setProperty("--accent-ink", "#ffffff");
+  document.body.style.background = "var(--bg)";
+  document.body.style.color = "var(--ink)";
+}
 
 /* ---------------------------- Βοηθητικά ---------------------------- */
 
@@ -279,10 +341,11 @@ const state = {
   currentStaff: LS.get("tim_currentStaff", null),
   config: LS.get("tim_config", {
     adminPin: DEFAULT_PIN,
-    vatRates: [13, 24],
+    vatRates: [6, 13, 24],
     staff: [],
     apiKey: "",
-    model: DEFAULT_MODEL
+    model: DEFAULT_MODEL,
+    theme: DEFAULT_THEME
   }),
   invoices: LS.get("tim_invoices_local", []),   // τοπικά μόνο (fallback χωρίς φάκελο)
   payments: LS.get("tim_payments_local", []),
@@ -429,8 +492,7 @@ async function callOpenRouterVision(dataUrl, apiKey, model){
     headers: {
       "Authorization": "Bearer " + apiKey,
       "Content-Type": "application/json",
-      "HTTP-Referer": location.href,
-      "X-Title": "Τιμολόγια Προμηθευτών"
+      "X-Title": "Invoice-Tracker-App"
     },
     body: JSON.stringify(body)
   });
@@ -495,11 +557,17 @@ function render(){
 function renderTopbar(){
   return `
   <div class="topbar">
-    <div>
-      <div class="title">Τιμολόγια Προμηθευτών</div>
-      <div class="sub">${folderReady ? "Συνδεδεμένος κοινός φάκελος" : "Χωρίς κοινό φάκελο — τοπική αποθήκευση"} · έκδ. ${APP_VERSION}</div>
+    <div class="identity">
+      <div class="applogo">🧾</div>
+      <div>
+        <div class="title">Τιμολόγια Προμηθευτών</div>
+        <div class="sub">${folderReady ? "Συνδεδεμένος κοινός φάκελος" : "Χωρίς κοινό φάκελο"} · έκδ. ${APP_VERSION}</div>
+      </div>
     </div>
-    ${state.unlocked ? `<button class="iconbtn" data-act="lock">Κλείδωμα</button>` : ""}
+    <div class="actions">
+      ${state.unlocked ? `<button class="navicon" data-act="go-settings" title="Ρυθμίσεις">⚙️</button>` : ""}
+      ${state.unlocked ? `<button class="navicon" data-act="lock" title="Κλείδωμα">🔒</button>` : ""}
+    </div>
   </div>`;
 }
 
@@ -537,9 +605,11 @@ function renderHome(){
   const suppliers = suppliersSummary();
   const totalOwed = suppliers.reduce((a,s)=>a+Math.max(0,s.balance),0);
   let html = `
-  <div class="card">
-    <div class="row"><div class="muted">Σύνολο οφειλών σε προμηθευτές</div></div>
-    <div class="big">${fmtMoney(totalOwed)}</div>
+  <div class="stat-tiles" style="margin-bottom:12px;">
+    <div class="stat-tile">
+      <div class="label"><span class="dot"></span>Σύνολο οφειλών σε προμηθευτές</div>
+      <div class="val">${fmtMoney(totalOwed)}</div>
+    </div>
   </div>`;
   if(!suppliers.length){
     html += `<div class="empty">Δεν υπάρχουν ακόμη καταχωρημένα τιμολόγια.<br>Πάτησε «Νέο τιμολόγιο» από κάτω για να ξεκινήσεις.</div>`;
@@ -615,7 +685,24 @@ function renderSupplierScreen(){
 
 function renderSettingsScreen(){
   const cfg = state.config;
+  const theme = cfg.theme || DEFAULT_THEME;
   return `
+  <div class="card">
+    <h2>Εμφάνιση εφαρμογής</h2>
+    <label>Θέμα</label>
+    <select id="f-theme-mode">
+      <option value="light" ${theme.mode!=="dark"?"selected":""}>Ανοιχτό</option>
+      <option value="dark" ${theme.mode==="dark"?"selected":""}>Σκοτεινό</option>
+    </select>
+    <label>Χρώμα έμφασης</label>
+    <div class="swatch-row">
+      ${THEME_PRESETS.map(p=>`<button class="swatch ${theme.accent===p.accent?'sel':''}" data-act="pick-accent"
+        data-accent="${p.accent}" title="${escapeHtml(p.name)}" style="background:${p.accent};"></button>`).join("")}
+    </div>
+    <input id="f-theme-accent" type="color" value="${theme.accent||DEFAULT_THEME.accent}" style="height:42px;padding:4px;">
+    <div style="height:10px"></div>
+    <button class="btn secondary" data-act="save-theme">Εφαρμογή εμφάνισης</button>
+  </div>
   <div class="card">
     <h2>Κοινός φάκελος</h2>
     <p class="muted">Σύνδεσε έναν φάκελο που συγχρονίζεται μέσω Google Drive, ώστε τα τιμολόγια να φαίνονται σε όλες τις συσκευές.</p>
@@ -922,6 +1009,16 @@ async function handleAction(act, el){
         } else toast("Ο κωδικός πρέπει να έχει 4 ψηφία.");
         render();
       } break;
+    case "pick-accent":
+      document.getElementById("f-theme-accent").value = el.getAttribute("data-accent"); break;
+    case "save-theme":
+      {
+        const mode = document.getElementById("f-theme-mode").value;
+        const accent = document.getElementById("f-theme-accent").value;
+        state.config.theme = {mode, accent};
+        persistLocal(); await writeConfigFile(state.config);
+        applyTheme(); toast("Η εμφάνιση αποθηκεύτηκε.");
+      } break;
     case "export-excel": exportInvoicesToExcel(); break;
     case "check-update": location.href = location.pathname + "?v=" + Date.now(); break;
     case "manual-entry":
@@ -1037,9 +1134,20 @@ function exportInvoicesToExcel(){
 
 /* ============================= Εκκίνηση ============================= */
 
+function migrateConfig(){
+  if(!state.config.vat6Added){
+    if(!state.config.vatRates.includes(6)) state.config.vatRates.unshift(6);
+    state.config.vat6Added = true;
+    persistLocal();
+  }
+}
+
 async function boot(){
+  migrateConfig();
+  applyTheme();
   await tryAutoConnectFolder();
   if(folderReady) await syncFromFolder();
+  applyTheme();
   render();
   // Περιοδικό ανανέωση για να φαίνονται τιμολόγια που πρόσθεσε άλλη συσκευή
   // μέσω του συγχρονισμού του Google Drive.
