@@ -81,8 +81,9 @@
   .pin-dot{width:14px;height:14px;border-radius:50%;border:1px solid var(--line);background:#fff;}
   .pin-dot.filled{background:var(--accent);border-color:var(--accent);}
   .keypad{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;max-width:260px;margin:0 auto;}
-  .keypad button{padding:16px 0;font-size:20px;border-radius:12px;border:1px solid var(--line);
-    background:#fff;cursor:pointer;}
+  .keypad button{height:58px;width:100%;font-size:20px;border-radius:12px;border:1px solid var(--line);
+    background:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;
+    padding:0;box-sizing:border-box;}
   .loader{display:flex;flex-direction:column;align-items:center;gap:10px;padding:30px 10px;color:var(--muted);}
   .spin{width:30px;height:30px;border:3px solid var(--line);border-top-color:var(--accent);
     border-radius:50%;animation:sp 0.8s linear infinite;}
@@ -123,7 +124,7 @@
    κλειδί OpenRouter (χωρίς κάρτα), όπως στο Identify-AI.
    ========================================================================= */
 
-const APP_VERSION = "1.1.0";
+const APP_VERSION = "1.6.0";
 const DEFAULT_PIN = "1111";
 const DEFAULT_MODEL = ""; // κενό = αυτόματη εύρεση δωρεάν μοντέλου με εικόνα
 const MODEL_LIST_CACHE_KEY = "tim_free_vision_models";
@@ -675,10 +676,10 @@ function renderLockedHome(){
     <h2>Καλώς ήρθες</h2>
     <p class="muted">Επίλεξε το όνομά σου για να καταχωρήσεις τιμολόγιο, ή μπες ως διαχειριστής για πλήρη πρόσβαση.</p>
     <div style="margin:10px 0 4px;">
-      ${staff.length ? staff.map(s=>`<span class="staff-chip ${state.currentStaff===s?'sel':''}" data-act="pick-staff" data-name="${escapeHtml(s)}">${escapeHtml(s)}</span>`).join("") : `<span class="muted">Δεν έχουν καταχωρηθεί ονόματα προσωπικού ακόμη.</span>`}
+      ${staff.length ? staff.map(s=>`<span class="staff-chip ${state.currentStaff===s?'sel':''}" data-act="pick-staff" data-name="${escapeHtml(s)}">${escapeHtml(s)}</span>`).join("") : `<div class="warnbox">Δεν έχουν καταχωρηθεί ονόματα προσωπικού ακόμη — μπες ως διαχειριστής και πρόσθεσέ τα από τις Ρυθμίσεις, στην ενότητα «Προσωπικό».</div>`}
     </div>
-    <div class="divider"></div>
-    <button class="btn" data-act="staff-continue" ${state.currentStaff?"":"disabled"}>Συνέχεια ως ${state.currentStaff?escapeHtml(state.currentStaff):"προσωπικό"}</button>
+    ${staff.length ? `<div class="divider"></div>
+    <button class="btn" data-act="staff-continue" ${state.currentStaff?"":"disabled"}>${state.currentStaff ? ("Συνέχεια ως "+escapeHtml(state.currentStaff)) : "Διάλεξε πρώτα όνομα από πάνω"}</button>` : ""}
     <div style="height:10px"></div>
     <button class="btn secondary" data-act="admin-login">Είσοδος διαχειριστή</button>
   </div>`;
@@ -1063,9 +1064,9 @@ function sheetPinHtml(s){
   ${s.error?`<div class="badbox">Λάθος κωδικός.</div>`:""}
   <div class="keypad">
     ${[1,2,3,4,5,6,7,8,9].map(n=>`<button data-act="pin-digit" data-d="${n}">${n}</button>`).join("")}
-    <button data-act="pin-clear">Καθαρισμός</button>
+    <button data-act="pin-clear" title="Καθαρισμός" style="font-size:22px;">⌫</button>
     <button data-act="pin-digit" data-d="0">0</button>
-    <button data-act="close-sheet">Άκυρο</button>
+    <button data-act="close-sheet" title="Άκυρο" style="font-size:18px;color:var(--bad);">✕</button>
   </div>`;
 }
 
@@ -1184,7 +1185,7 @@ async function handleAction(act, el){
         render();
       } break;
     case "pin-clear":
-      state.sheet.pin = ""; state.sheet.error = false; render(); break;
+      state.sheet.pin = (state.sheet.pin||"").slice(0,-1); state.sheet.error = false; render(); break;
     case "close-sheet": closeSheet(); break;
     case "go-home": state.screen="home"; state.sheet=null; render(); break;
     case "go-settings": state.screen="settings"; state.sheet=null; render(); break;
