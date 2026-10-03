@@ -432,6 +432,18 @@ function supplierPayments(key){
 }
 
 /* Κατανομή πληρωμής: παλαιότερο τιμολόγιο πρώτα */
+/* Πιθανή διπλοεγγραφή: ίδιος προμηθευτής, ίδια ημερομηνία, περίπου ίδιο ποσό */
+function findPossibleDuplicate(supplierName, date, grossAmount){
+  const key = normalizeForMatch(supplierName);
+  const amt = Number(grossAmount)||0;
+  if(!key || !date || !amt) return null;
+  return allInvoices().find(inv=>
+    normalizeForMatch(inv.supplierName)===key &&
+    inv.date===date &&
+    Math.abs((Number(inv.grossAmount)||0) - amt) < 0.01
+  ) || null;
+}
+
 function invoiceRemaining(inv, payments){
   // Απλή λογική προβολής: το άθροισμα πληρωμών "επί πιστώσει" για τον προμηθευτή
   // αφαιρείται διαδοχικά από τα παλαιότερα τιμολόγια. Εδώ υπολογίζουμε συγκεντρωτικά
@@ -561,7 +573,7 @@ async function extractInvoiceData(file, onProgress){
   let lastErr = null;
   for(let i=0;i<modelsToTry.length;i++){
     const model = modelsToTry[i];
-    if(onProgress) onProgress(i+1, modelsToTry.length);
+    if(onProgress) onProgress(i+1, modelsToTry.length, model);
     try{
       const text = await callOpenRouterVision(dataUrl, apiKey, model);
       const parsed = parseJsonLoose(text);
@@ -703,10 +715,11 @@ function renderSupplierScreen(){
     <button class="btn" data-act="open-payment" data-key="${escapeHtml(s.key)}">Καταχώρηση πληρωμής</button>
   </div>
   <div class="card">
-    <h3>Τιμολόγια</h3>`;
+    <h3>Τιμολόγια</h3>
+    <div class="muted" style="font-size:12px;margin-bottom:4px;">Κράτα πατημένο ένα τιμολόγιο για διαγραφή.</div>`;
   for(const inv of [...s.invoices].reverse()){
     html += `
-    <div class="list-item">
+    <div class="list-item" data-longpress="del-invoice" data-id="${escapeHtml(inv.id)}">
       <div>
         <div style="font-weight:600;">${fmtDate(inv.date)}</div>
         <div class="muted">${inv.paymentType==='μετρητοίς'?'Μετρητοίς':'Επί πιστώσει'} ${inv.who?('· '+escapeHtml(inv.who)):''}</div>
@@ -821,7 +834,8 @@ function renderReorderList(items, kind){
 /* -------------------------------- Φόρμα νέου τιμολογίου (sheet) -------------------------------- */
 
 function openAddInvoiceSheet(){
-  state.sheet = {type:"add-invoice", step:"capture", file:null, extracted:null, dataUrl:null};
+  state.sheet = {type:"add-invoice", step:"capture", file:null, extracted:null, dataUrl:null,
+    queue:[], index:0, mode:"single", savedCount:0};
   render();
 }
 
@@ -838,23 +852,32 @@ function sheetAddInvoiceHtml(s){
     <div style="height:10px"></div>
     <div style="position:relative;">
       <button class="btn secondary">🖼️ Επιλογή από συλλογή</button>
-      <input type="file" accept="image/*" data-act="capture-gallery"
+      <input type="file" accept="image/*" multiple data-act="capture-gallery"
         style="position:absolute;inset:0;opacity:0;cursor:pointer;">
+    </div>
+    <div class="muted" style="margin-top:6px;font-size:12px;">Από τη συλλογή μπορείς να επιλέξεις πολλές φωτογραφίες μαζί — θα περάσουν η μία μετά την άλλη από ανάλυση και επιβεβαίωση.
     </div>
     <div style="height:10px"></div>
     <button class="btn secondary" data-act="close-sheet">Άκυρο</button>`;
   }
   if(s.step === "loading"){
-    const prog = s.progress ? `<div class="muted">Δοκιμή δωρεάν μοντέλου ${s.progress.i} από ${s.progress.n}…</div>` : "";
-    return `<div class="loader"><div class="spin"></div><div>Ανάλυση τιμολογίου με τεχνητή νοημοσύνη…</div>${prog}</div>`;
+    const prog = s.progress ? `<div class="muted">Δοκιμή μοντέλου ${s.progress.i}/${s.progress.n}: ${escapeHtml(s.progress.model||"")}</div>` : "";
+    const bulk = (s.mode==="bulk") ? `<div class="muted" style="margin-bottom:4px;">Φωτογραφία ${s.index+1} από ${s.queue.length}</div>` : "";
+    return `<div class="loader"><div class="spin"></div>${bulk}<div>Ανάλυση τιμολογίου με τεχνητή νοημοσύνη…</div>${prog}</div>`;
   }
   if(s.step === "error"){
+    const hasMore = s.mode==="bulk" && (s.index < s.queue.length-1);
     return `
-    <h2>Δεν έγινε η ανάλυση</h2>
+    <h2>Δεν έγινε η ανάλυση${s.mode==="bulk" ? (" (φωτογραφία "+(s.index+1)+"/"+s.queue.length+")") : ""}</h2>
     <div class="badbox">${escapeHtml(s.errorMsg||"Άγνωστο σφάλμα.")}</div>
     <button class="btn secondary" data-act="manual-entry">Συνέχεια με μη αυτόματη καταχώρηση</button>
     <div style="height:8px"></div>
-    <button class="btn" data-act="retry-capture">Δοκίμασε άλλη φωτογραφία</button>`;
+    ${s.mode==="bulk"
+      ? `<button class="btn" data-act="retry-current">Δοκίμασε ξανά αυτή τη φωτογραφία</button>
+         <div style="height:8px"></div>
+         ${hasMore ? `<button class="btn secondary" data-act="skip-bulk-item">Παράλειψη — επόμενη φωτογραφία</button><div style="height:8px"></div>` : ""}
+         <button class="btn danger" data-act="close-sheet">Ακύρωση όλων</button>`
+      : `<button class="btn" data-act="retry-capture">Δοκίμασε άλλη φωτογραφία</button>`}`;
   }
   if(s.step === "confirm"){
     const d = s.extracted || {};
@@ -862,10 +885,23 @@ function sheetAddInvoiceHtml(s){
     if(d.isInvoice === false) warn += `<div class="warnbox">Το AI δεν είναι σίγουρο ότι αυτό είναι τιμολόγιο: ${escapeHtml(d.notInvoiceReason||"")}. Έλεγξε τα στοιχεία πριν αποθηκεύσεις.</div>`;
     if(d.amountConfident === false) warn += `<div class="warnbox">Το ποσό δεν διαβάστηκε με σιγουριά — έλεγξέ το.</div>`;
     if(d.supplierConfident === false) warn += `<div class="warnbox">Το όνομα προμηθευτή δεν διαβάστηκε με σιγουριά — έλεγξέ το.</div>`;
+    const dup = findPossibleDuplicate(d.supplierName, d.date, d.grossAmount);
+    let dupHtml = "";
+    if(dup && !s.dupConfirmed){
+      dupHtml = `<div class="badbox">Μάλλον υπάρχει ήδη καταχωρημένο: <b>${escapeHtml(dup.supplierName)}</b>, ${fmtDate(dup.date)}, ${fmtMoney(dup.grossAmount)}. Έλεγξε μήπως είναι διπλή καταχώρηση.</div>`;
+    }
     return `
-    <h2>Επιβεβαίωση στοιχείων</h2>
+    <h2>Επιβεβαίωση στοιχείων${s.mode==="bulk" ? (" ("+(s.index+1)+"/"+s.queue.length+")") : ""}</h2>
     ${s.dataUrl?`<div class="thumb-row"><img src="${s.dataUrl}"></div>`:""}
     ${warn}
+    ${dupHtml}
+    <div style="background:#eef3ef;border:2px solid var(--accent);border-radius:10px;padding:10px 12px;margin-bottom:10px;">
+      <label style="font-weight:800;color:var(--accent);margin:0 0 6px;font-size:15px;">Τρόπος πληρωμής</label>
+      <select id="f-paytype" style="font-weight:700;">
+        <option value="μετρητοίς" ${(d.paymentType||"μετρητοίς")==="μετρητοίς"?"selected":""}>Μετρητοίς</option>
+        <option value="επί πιστώσει" ${d.paymentType==="επί πιστώσει"?"selected":""}>Επί πιστώσει</option>
+      </select>
+    </div>
     <label>Προμηθευτής</label>
     <input id="f-supplier" value="${escapeHtml(d.supplierName||"")}">
     <div class="grid2">
@@ -890,13 +926,8 @@ function sheetAddInvoiceHtml(s){
       </div>
       <div><label>Σύνολο (€)</label><input id="f-gross" type="number" step="0.01" value="${d.grossAmount||""}"></div>
     </div>
-    <label style="font-weight:700;color:var(--ink);">Τρόπος πληρωμής</label>
-    <select id="f-paytype">
-      <option value="μετρητοίς" ${state.currentStaff?"selected":""}>Μετρητοίς</option>
-      <option value="επί πιστώσει">Επί πιστώσει</option>
-    </select>
     <div style="height:12px"></div>
-    <button class="btn" data-act="save-invoice">Αποθήκευση τιμολογίου</button>
+    <button class="btn" data-act="save-invoice">${dup && !s.dupConfirmed ? "Αποθήκευση όπως είναι (υπάρχει παρόμοιο)" : ((s.mode==="bulk" && s.index<s.queue.length-1) ? "Αποθήκευση & επόμενη φωτογραφία" : "Αποθήκευση τιμολογίου")}</button>
     <div style="height:8px"></div>
     <button class="btn secondary" data-act="close-sheet">Άκυρο</button>`;
   }
@@ -966,11 +997,61 @@ function bindEvents(){
   document.querySelectorAll("[data-act]").forEach(el=>{
     const act = el.getAttribute("data-act");
     if(el.tagName === "INPUT" && el.type === "file"){
-      el.addEventListener("change", (e)=>onFileChosen(e.target.files[0]));
+      el.addEventListener("change", (e)=>onFilesChosen(Array.from(e.target.files||[])));
       return;
     }
     el.addEventListener("click", (e)=>handleAction(act, el, e));
   });
+  document.querySelectorAll("[data-longpress]").forEach(el=>{
+    bindLongPress(el);
+  });
+}
+
+function bindLongPress(el){
+  let timer = null, fired = false;
+  const LONG_MS = 550;
+  const start = ()=>{
+    fired = false;
+    timer = setTimeout(()=>{
+      fired = true;
+      handleLongPress(el.getAttribute("data-longpress"), el);
+    }, LONG_MS);
+  };
+  const cancel = ()=>{ if(timer){ clearTimeout(timer); timer=null; } };
+  el.addEventListener("touchstart", start, {passive:true});
+  el.addEventListener("touchend", cancel);
+  el.addEventListener("touchmove", cancel);
+  el.addEventListener("mousedown", start);
+  el.addEventListener("mouseup", cancel);
+  el.addEventListener("mouseleave", cancel);
+  el.addEventListener("contextmenu", (e)=>{ e.preventDefault(); });
+  el.style.webkitTouchCallout = "none";
+  el.style.webkitUserSelect = "none";
+  el.style.userSelect = "none";
+}
+
+function handleLongPress(kind, el){
+  if(kind === "del-invoice"){
+    const id = el.getAttribute("data-id");
+    if(confirm("Διαγραφή αυτού του τιμολογίου; Δεν αναιρείται.")){
+      deleteInvoiceById(id);
+    }
+  }
+}
+
+async function deleteInvoiceById(id){
+  const fIdx = folderInvoices.findIndex(x=>x.id===id);
+  if(fIdx>=0) folderInvoices.splice(fIdx,1);
+  if(folderReady && invDirHandle){
+    try{ await invDirHandle.removeEntry(id + ".json"); }catch(e){ /* δεν υπήρχε εκεί, δεν πειράζει */ }
+  }
+  const lIdx = state.invoices.findIndex(x=>x.id===id);
+  if(lIdx>=0){
+    state.invoices.splice(lIdx,1);
+    LS.set("tim_invoices_local", state.invoices);
+  }
+  toast("Το τιμολόγιο διαγράφηκε.");
+  render();
 }
 
 async function handleAction(act, el){
@@ -1079,9 +1160,17 @@ async function handleAction(act, el){
     case "export-excel": exportInvoicesToExcel(); break;
     case "check-update": location.href = location.pathname + "?v=" + Date.now(); break;
     case "manual-entry":
-      state.sheet.step = "confirm"; state.sheet.extracted = {date: todayISO()}; render(); break;
+      state.sheet.step = "confirm"; state.sheet.extracted = {date: todayISO()}; state.sheet.dataUrl = state.sheet.dataUrl||null; render(); break;
     case "retry-capture":
       state.sheet.step = "capture"; render(); break;
+    case "retry-current":
+      await startQueueItem(state.sheet.index); break;
+    case "skip-bulk-item":
+      {
+        const nextIdx = state.sheet.index + 1;
+        if(nextIdx < state.sheet.queue.length){ await startQueueItem(nextIdx); }
+        else { finishBulk(); }
+      } break;
     case "save-invoice": await saveInvoiceFromForm(); break;
     case "save-payment": await savePaymentFromForm(el.getAttribute("data-key")); break;
   }
@@ -1093,26 +1182,50 @@ function moveItem(arr, i, dir){
   [arr[i], arr[j]] = [arr[j], arr[i]];
 }
 
-async function onFileChosen(file){
-  if(!file) return;
-  state.sheet.file = file;
-  state.sheet.step = "loading";
+async function onFilesChosen(files){
+  if(!files || !files.length) return;
+  state.sheet.queue = files;
+  state.sheet.index = 0;
+  state.sheet.mode = files.length > 1 ? "bulk" : "single";
+  state.sheet.savedCount = 0;
+  await startQueueItem(0);
+}
+
+async function startQueueItem(idx){
+  const s = state.sheet;
+  if(!s) return;
+  const file = s.queue[idx];
+  if(!file){ finishBulk(); return; }
+  s.index = idx;
+  s.file = file;
+  s.step = "loading";
+  s.progress = null;
+  s.dupConfirmed = false;
   render();
   try{
     const dataUrl = await fileToDataUrl(file);
-    const {parsed} = await extractInvoiceData(file, (i,n)=>{
-      if(state.sheet && state.sheet.step==="loading"){ state.sheet.progress = {i,n}; render(); }
+    const {parsed} = await extractInvoiceData(file, (i,n,model)=>{
+      if(state.sheet && state.sheet.step==="loading"){ state.sheet.progress = {i,n,model}; render(); }
     });
-    state.sheet.extracted = parsed;
-    state.sheet.dataUrl = dataUrl;
-    state.sheet.step = "confirm";
+    s.extracted = parsed;
+    s.dataUrl = dataUrl;
+    s.step = "confirm";
   }catch(e){
     console.error(e);
-    state.sheet.step = "error";
-    state.sheet.errorMsg = (e && e.message === "NO_API_KEY")
+    s.step = "error";
+    s.errorMsg = (e && e.message === "NO_API_KEY")
       ? "Δεν έχει καταχωρηθεί κλειδί OpenRouter στις Ρυθμίσεις."
       : ("Η ανάλυση απέτυχε: " + (e && e.message ? e.message : "άγνωστο σφάλμα"));
   }
+  render();
+}
+
+function finishBulk(){
+  const s = state.sheet;
+  const n = s ? s.savedCount : 0;
+  closeSheet();
+  state.screen = "home";
+  toast(n ? ("Αποθηκεύτηκαν " + n + " τιμολόγια.") : "Δεν αποθηκεύτηκε κανένα τιμολόγιο.");
   render();
 }
 
@@ -1134,6 +1247,18 @@ async function saveInvoiceFromForm(){
     createdAt: Date.now()
   };
   if(!inv.supplierName){ toast("Συμπλήρωσε το όνομα προμηθευτή."); return; }
+
+  const sheetBefore = state.sheet;
+  if(sheetBefore && !sheetBefore.dupConfirmed){
+    const dup = findPossibleDuplicate(inv.supplierName, inv.date, inv.grossAmount);
+    if(dup){
+      sheetBefore.dupConfirmed = true; // το επόμενο πάτημα θα προχωρήσει κανονικά
+      render();
+      return;
+    }
+  }
+  if(sheetBefore) sheetBefore.dupConfirmed = false;
+
   if(folderReady){
     try{ await writeJsonFile(invDirHandle, inv.id + ".json", inv); }
     catch(e){ console.error(e); state.invoices.push(inv); LS.set("tim_invoices_local", state.invoices); }
@@ -1141,6 +1266,20 @@ async function saveInvoiceFromForm(){
     state.invoices.push(inv); LS.set("tim_invoices_local", state.invoices);
   }
   if(folderReady) folderInvoices.push(inv);
+
+  const s = state.sheet;
+  if(s && s.mode === "bulk"){
+    s.savedCount = (s.savedCount||0) + 1;
+    const nextIdx = s.index + 1;
+    if(nextIdx < s.queue.length){
+      toast("Αποθηκεύτηκε. Επόμενη φωτογραφία…");
+      await startQueueItem(nextIdx);
+      return;
+    }
+    finishBulk();
+    return;
+  }
+
   closeSheet();
   state.screen = "home";
   toast("Το τιμολόγιο αποθηκεύτηκε.");
