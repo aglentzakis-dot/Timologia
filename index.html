@@ -1,0 +1,1056 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Τιμολόγια Προμηθευτών</title>
+<style>
+  :root{
+    --bg:#f6f5f2; --panel:#ffffff; --ink:#1f2420; --muted:#6b756d;
+    --line:#dfe2de; --accent:#2f6f4f; --accent-ink:#ffffff;
+    --warn:#a6480f; --bad:#b3261e; --good:#2f6f4f; --radius:14px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;}
+  body{padding-bottom:70px;}
+  button{font-family:inherit;}
+  h1,h2,h3{margin:0 0 8px 0;font-weight:700;}
+  .topbar{position:sticky;top:0;z-index:20;background:var(--panel);
+    border-bottom:1px solid var(--line);padding:12px 16px;display:flex;
+    align-items:center;justify-content:space-between;gap:8px;}
+  .topbar .title{font-size:17px;font-weight:700;}
+  .topbar .sub{font-size:12px;color:var(--muted);}
+  .iconbtn{background:none;border:1px solid var(--line);border-radius:10px;
+    padding:8px 10px;font-size:14px;color:var(--ink);cursor:pointer;}
+  .wrap{max-width:720px;margin:0 auto;padding:14px 16px 24px;}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:14px;margin-bottom:12px;}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:10px;}
+  .muted{color:var(--muted);font-size:13px;}
+  .big{font-size:22px;font-weight:700;}
+  .pill{display:inline-block;padding:3px 9px;border-radius:999px;font-size:12px;font-weight:600;}
+  .pill.owe{background:#fbe9e3;color:var(--warn);}
+  .pill.ok{background:#e4f0e8;color:var(--good);}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;
+    padding:11px 16px;border-radius:11px;border:1px solid var(--accent);
+    background:var(--accent);color:var(--accent-ink);font-size:15px;font-weight:600;
+    cursor:pointer;width:100%;}
+  .btn.secondary{background:var(--panel);color:var(--ink);border-color:var(--line);}
+  .btn.danger{background:var(--panel);color:var(--bad);border-color:#f0c9c6;}
+  .btn.small{width:auto;padding:8px 12px;font-size:13px;}
+  input,select,textarea{width:100%;padding:11px 12px;border:1px solid var(--line);
+    border-radius:10px;font-size:15px;background:#fff;color:var(--ink);font-family:inherit;}
+  label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px;}
+  .field{margin-bottom:4px;}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .divider{height:1px;background:var(--line);margin:12px 0;}
+  .list-item{display:flex;align-items:center;justify-content:space-between;
+    padding:12px 0;border-bottom:1px solid var(--line);gap:10px;}
+  .list-item:last-child{border-bottom:none;}
+  .sheet-overlay{position:fixed;inset:0;background:rgba(20,22,20,.45);z-index:50;
+    display:flex;align-items:flex-end;justify-content:center;}
+  .sheet{background:var(--panel);border-radius:18px 18px 0 0;max-width:720px;width:100%;
+    max-height:88vh;overflow-y:auto;padding:16px 16px 22px;}
+  .sheet-handle{width:36px;height:4px;background:var(--line);border-radius:3px;margin:0 auto 10px;}
+  .center-sheet{align-items:center;padding:20px;}
+  .center-sheet .sheet{border-radius:18px;max-height:80vh;}
+  .warnbox{background:#fff4e9;border:1px solid #f0d3a8;color:#7a4b0c;border-radius:10px;
+    padding:10px 12px;font-size:13px;margin-bottom:10px;}
+  .badbox{background:#fbe9e7;border:1px solid #f0c0ba;color:var(--bad);border-radius:10px;
+    padding:10px 12px;font-size:13px;margin-bottom:10px;}
+  .bottom-nav{position:fixed;bottom:0;left:0;right:0;background:var(--panel);
+    border-top:1px solid var(--line);display:flex;z-index:30;}
+  .bottom-nav button{flex:1;background:none;border:none;padding:10px 0 12px;
+    font-size:12px;color:var(--muted);display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;}
+  .bottom-nav button.active{color:var(--accent);font-weight:700;}
+  .bottom-nav .ic{font-size:19px;}
+  .staff-chip{display:inline-flex;align-items:center;gap:6px;background:#eef3ef;
+    border-radius:999px;padding:6px 12px;font-size:13px;font-weight:600;margin:4px 6px 0 0;cursor:pointer;
+    border:1px solid var(--line);}
+  .staff-chip.sel{background:var(--accent);color:#fff;border-color:var(--accent);}
+  .pin-dots{display:flex;gap:12px;justify-content:center;margin:16px 0;}
+  .pin-dot{width:14px;height:14px;border-radius:50%;border:1px solid var(--line);background:#fff;}
+  .pin-dot.filled{background:var(--accent);border-color:var(--accent);}
+  .keypad{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;max-width:260px;margin:0 auto;}
+  .keypad button{padding:16px 0;font-size:20px;border-radius:12px;border:1px solid var(--line);
+    background:#fff;cursor:pointer;}
+  .loader{display:flex;flex-direction:column;align-items:center;gap:10px;padding:30px 10px;color:var(--muted);}
+  .spin{width:30px;height:30px;border:3px solid var(--line);border-top-color:var(--accent);
+    border-radius:50%;animation:sp 0.8s linear infinite;}
+  @keyframes sp{to{transform:rotate(360deg);}}
+  .empty{text-align:center;color:var(--muted);padding:30px 10px;font-size:14px;}
+  .thumb-row{display:flex;gap:8px;overflow-x:auto;margin:8px 0;}
+  .thumb-row img{width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--line);}
+  a.linklike{color:var(--accent);text-decoration:none;font-weight:600;}
+  .reorder-row{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line);}
+  .reorder-row .arrows{display:flex;flex-direction:column;gap:2px;}
+  .reorder-row .arrows button{border:none;background:none;cursor:pointer;color:var(--muted);font-size:13px;padding:0 4px;}
+  .toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#1f2420;
+    color:#fff;padding:10px 16px;border-radius:10px;font-size:13px;z-index:60;max-width:90%;text-align:center;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script>
+"use strict";
+
+/* =========================================================================
+   ΤΙΜΟΛΟΓΙΑ ΠΡΟΜΗΘΕΥΤΩΝ — αυτόνομη εφαρμογή (ένα αρχείο, χωρίς διακομιστή)
+   Αποθήκευση: κοινός φάκελος (συγχρονισμένος μέσω Google Drive) μέσω File
+   System Access API — ένα αρχείο ανά τιμολόγιο/πληρωμή, για να μη χάνεται
+   τίποτα όταν γράφουν ταυτόχρονα δύο συσκευές. Τεχνητή νοημοσύνη: δωρεάν
+   κλειδί OpenRouter (χωρίς κάρτα), όπως στο Identify-AI.
+   ========================================================================= */
+
+const APP_VERSION = "1.0.0";
+const DEFAULT_PIN = "1111";
+const DEFAULT_MODEL = "openrouter/free:free";
+const FALLBACK_MODELS = [
+  "openrouter/free:free",
+  "qwen/qwen2.5-vl-72b-instruct:free",
+  "meta-llama/llama-3.2-11b-vision-instruct:free",
+  "google/gemini-2.0-flash-exp:free"
+];
+
+/* ---------------------------- Βοηθητικά ---------------------------- */
+
+function uid(prefix){
+  return prefix + "_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2,8);
+}
+function normalizeForMatch(s){
+  if(!s) return "";
+  return s.toString().normalize("NFD").replace(/[̀-ͯ]/g,"")
+    .toUpperCase().replace(/[^A-ZΑ-Ω0-9]/gi,"");
+}
+function todayISO(){ return new Date().toISOString().slice(0,10); }
+function fmtMoney(n){
+  n = Number(n)||0;
+  return n.toLocaleString("el-GR",{minimumFractionDigits:2,maximumFractionDigits:2}) + " €";
+}
+function fmtDate(iso){
+  if(!iso) return "—";
+  const d = new Date(iso + (iso.length<=10?"T00:00:00":""));
+  if(isNaN(d)) return iso;
+  return d.toLocaleDateString("el-GR",{day:"2-digit",month:"2-digit",year:"numeric"});
+}
+function escapeHtml(s){
+  return (s==null?"":String(s)).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+function toast(msg, ms){
+  const el = document.createElement("div");
+  el.className = "toast";
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(()=>el.remove(), ms||2600);
+}
+
+/* ---------------------------- Τοπική αποθήκη ---------------------------- */
+
+const LS = {
+  get(key, fallback){ try{ const v = localStorage.getItem(key); return v==null?fallback:JSON.parse(v); }catch(e){ return fallback; } },
+  set(key, val){ try{ localStorage.setItem(key, JSON.stringify(val)); }catch(e){} }
+};
+
+/* ---------------------------- Κοινός φάκελος (IndexedDB handle) ---------------------------- */
+
+function openHandleDB(){
+  return new Promise((resolve,reject)=>{
+    const req = indexedDB.open("shared-backups", 1);
+    req.onupgradeneeded = ()=>{ req.result.createObjectStore("handles"); };
+    req.onsuccess = ()=>resolve(req.result);
+    req.onerror = ()=>reject(req.error);
+  });
+}
+async function idbGet(key){
+  const db = await openHandleDB();
+  return new Promise((resolve,reject)=>{
+    const tx = db.transaction("handles","readonly");
+    const req = tx.objectStore("handles").get(key);
+    req.onsuccess = ()=>resolve(req.result||null);
+    req.onerror = ()=>reject(req.error);
+  });
+}
+async function idbSet(key, val){
+  const db = await openHandleDB();
+  return new Promise((resolve,reject)=>{
+    const tx = db.transaction("handles","readwrite");
+    tx.objectStore("handles").put(val, key);
+    tx.oncomplete = ()=>resolve();
+    tx.onerror = ()=>reject(tx.error);
+  });
+}
+
+let rootDirHandle = null;   // κοινός φάκελος (ο ίδιος για όλες τις εφαρμογές)
+let appDirHandle = null;    // υποφάκελος "Timologia"
+let invDirHandle = null, payDirHandle = null;
+let folderReady = false;
+
+async function ensureSubdir(parent, name){
+  return await parent.getDirectoryHandle(name, {create:true});
+}
+
+async function tryAutoConnectFolder(){
+  try{
+    const handle = await idbGet("root");
+    if(!handle) return false;
+    const perm = await handle.queryPermission({mode:"readwrite"});
+    if(perm !== "granted") return false; // θα ζητηθεί ξανά όταν πατήσει κάτι ο χρήστης
+    rootDirHandle = handle;
+    appDirHandle = await ensureSubdir(rootDirHandle, "Timologia");
+    invDirHandle = await ensureSubdir(appDirHandle, "invoices");
+    payDirHandle = await ensureSubdir(appDirHandle, "payments");
+    folderReady = true;
+    return true;
+  }catch(e){ return false; }
+}
+
+async function connectFolder(){
+  if(!window.showDirectoryPicker){
+    toast("Ο browser αυτός δεν υποστηρίζει κοινό φάκελο· θα δουλέψουμε μόνο τοπικά.");
+    return false;
+  }
+  try{
+    let handle = await idbGet("root");
+    if(handle){
+      const perm = await handle.requestPermission({mode:"readwrite"});
+      if(perm === "granted"){
+        rootDirHandle = handle;
+      }
+    }
+    if(!rootDirHandle){
+      rootDirHandle = await window.showDirectoryPicker({id:"backups", mode:"readwrite", startIn:"downloads"});
+      await idbSet("root", rootDirHandle);
+    }
+    appDirHandle = await ensureSubdir(rootDirHandle, "Timologia");
+    invDirHandle = await ensureSubdir(appDirHandle, "invoices");
+    payDirHandle = await ensureSubdir(appDirHandle, "payments");
+    folderReady = true;
+    toast("Ο κοινός φάκελος συνδέθηκε.");
+    return true;
+  }catch(e){
+    console.error(e);
+    toast("Η σύνδεση του φακέλου ακυρώθηκε ή απέτυχε.");
+    return false;
+  }
+}
+
+async function writeJsonFile(dirHandle, filename, data){
+  const fh = await dirHandle.getFileHandle(filename, {create:true});
+  const ws = await fh.createWritable();
+  await ws.write(JSON.stringify(data, null, 2));
+  await ws.close();
+}
+async function readAllJsonFiles(dirHandle){
+  const out = [];
+  if(!dirHandle) return out;
+  for await (const [name, handle] of dirHandle.entries()){
+    if(handle.kind !== "file" || !name.endsWith(".json")) continue;
+    try{
+      const file = await handle.getFile();
+      const text = await file.text();
+      const obj = JSON.parse(text);
+      obj.__file = name;
+      out.push(obj);
+    }catch(e){ /* αγνοούμε κατεστραμμένο αρχείο */ }
+  }
+  return out;
+}
+async function writeConfigFile(cfg){
+  if(!appDirHandle) return;
+  try{ await writeJsonFile(appDirHandle, "config.json", cfg); }catch(e){}
+}
+async function readConfigFile(){
+  if(!appDirHandle) return null;
+  try{
+    const fh = await appDirHandle.getFileHandle("config.json", {create:false});
+    const file = await fh.getFile();
+    return JSON.parse(await file.text());
+  }catch(e){ return null; }
+}
+
+/* ---------------------------- Κατάσταση εφαρμογής ---------------------------- */
+
+const state = {
+  screen: "home",              // home | supplier | add | settings
+  unlocked: LS.get("tim_unlocked", false),
+  currentStaff: LS.get("tim_currentStaff", null),
+  config: LS.get("tim_config", {
+    adminPin: DEFAULT_PIN,
+    vatRates: [13, 24],
+    staff: [],
+    apiKey: "",
+    model: DEFAULT_MODEL
+  }),
+  invoices: LS.get("tim_invoices_local", []),   // τοπικά μόνο (fallback χωρίς φάκελο)
+  payments: LS.get("tim_payments_local", []),
+  openSupplierKey: null,
+  sheet: null,                 // ποιο bottom-sheet είναι ανοιχτό
+  busy: false,
+  busyMsg: ""
+};
+
+function persistLocal(){
+  LS.set("tim_unlocked", state.unlocked);
+  LS.set("tim_currentStaff", state.currentStaff);
+  LS.set("tim_config", state.config);
+}
+
+/* Συγχώνευση: αρχεία κοινού φακέλου + τοπικά (fallback) χωρίς διπλοεγγραφές */
+let folderInvoices = [];
+let folderPayments = [];
+
+async function syncFromFolder(){
+  if(!folderReady) return;
+  try{
+    folderInvoices = await readAllJsonFiles(invDirHandle);
+    folderPayments = await readAllJsonFiles(payDirHandle);
+    const cfg = await readConfigFile();
+    if(cfg){
+      // Οι ρυθμίσεις του κοινού αρχείου υπερισχύουν (τις διαχειρίζεται ο διαχειριστής)
+      state.config.adminPin = cfg.adminPin || state.config.adminPin;
+      state.config.vatRates = cfg.vatRates || state.config.vatRates;
+      state.config.staff = cfg.staff || state.config.staff;
+      persistLocal();
+    }
+  }catch(e){ console.error(e); }
+}
+
+function allInvoices(){
+  const ids = new Set();
+  const out = [];
+  for(const inv of folderInvoices){ if(!ids.has(inv.id)){ ids.add(inv.id); out.push(inv); } }
+  for(const inv of state.invoices){ if(!ids.has(inv.id)){ ids.add(inv.id); out.push(inv); } }
+  return out.sort((a,b)=> (b.date||"").localeCompare(a.date||"") || (b.createdAt||0)-(a.createdAt||0));
+}
+function allPayments(){
+  const ids = new Set();
+  const out = [];
+  for(const p of folderPayments){ if(!ids.has(p.id)){ ids.add(p.id); out.push(p); } }
+  for(const p of state.payments){ if(!ids.has(p.id)){ ids.add(p.id); out.push(p); } }
+  return out.sort((a,b)=> (b.date||"").localeCompare(a.date||""));
+}
+
+function suppliersSummary(){
+  const map = new Map();
+  for(const inv of allInvoices()){
+    const key = normalizeForMatch(inv.supplierName);
+    if(!key) continue;
+    if(!map.has(key)) map.set(key, {
+      key, name: inv.supplierName, phone:"", afm:"", address:"", email:"",
+      invoices: [], totalInvoiced: 0
+    });
+    const s = map.get(key);
+    s.invoices.push(inv);
+    s.totalInvoiced += Number(inv.grossAmount)||0;
+    // πιο πρόσφατα στοιχεία επικάλυψης (το τελευταίο τιμολόγιο με τιμή κερδίζει)
+    if(inv.phone) s.phone = inv.phone;
+    if(inv.afm) s.afm = inv.afm;
+    if(inv.address) s.address = inv.address;
+    if(inv.email) s.email = inv.email;
+    if(inv.supplierName) s.name = inv.supplierName;
+  }
+  for(const p of allPayments()){
+    const key = normalizeForMatch(p.supplierName);
+    if(!map.has(key)) map.set(key, {key, name:p.supplierName, phone:"",afm:"",address:"",email:"", invoices:[], totalInvoiced:0});
+    map.get(key).totalPaid = (map.get(key).totalPaid||0) + (Number(p.amount)||0);
+  }
+  const list = Array.from(map.values()).map(s=>{
+    s.totalPaid = s.totalPaid||0;
+    s.balance = Math.round((s.totalInvoiced - s.totalPaid)*100)/100;
+    s.invoices.sort((a,b)=>(a.date||"").localeCompare(b.date||""));
+    return s;
+  });
+  list.sort((a,b)=> b.balance - a.balance || a.name.localeCompare(b.name,"el"));
+  return list;
+}
+
+function supplierPayments(key){
+  return allPayments().filter(p=>normalizeForMatch(p.supplierName)===key);
+}
+
+/* Κατανομή πληρωμής: παλαιότερο τιμολόγιο πρώτα */
+function invoiceRemaining(inv, payments){
+  // Απλή λογική προβολής: το άθροισμα πληρωμών "επί πιστώσει" για τον προμηθευτή
+  // αφαιρείται διαδοχικά από τα παλαιότερα τιμολόγια. Εδώ υπολογίζουμε συγκεντρωτικά
+  // στο suppliersSummary (balance), οπότε ανά τιμολόγιο δείχνουμε απλά κατάσταση.
+  return inv;
+}
+
+/* ---------------------------- OpenRouter: εξαγωγή δεδομένων τιμολογίου ---------------------------- */
+
+async function fileToDataUrl(file){
+  return new Promise((resolve,reject)=>{
+    const reader = new FileReader();
+    reader.onload = ()=>resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+const EXTRACTION_PROMPT = `Σου δίνω φωτογραφία ενός τιμολογίου ή μιας απόδειξης προμηθευτή.
+Διάβασέ το προσεκτικά και απάντησε ΜΟΝΟ με ένα JSON αντικείμενο, χωρίς καθόλου άλλο κείμενο, με ακριβώς αυτά τα πεδία:
+{
+ "isInvoice": true/false,
+ "notInvoiceReason": "κενό αν είναι τιμολόγιο, αλλιώς σύντομη εξήγηση",
+ "supplierName": "επωνυμία προμηθευτή/εκδότη",
+ "phone": "τηλέφωνο εκδότη αν υπάρχει",
+ "afm": "ΑΦΜ εκδότη αν υπάρχει",
+ "address": "διεύθυνση εκδότη αν υπάρχει",
+ "email": "email εκδότη αν υπάρχει",
+ "date": "ημερομηνία έκδοσης σε μορφή YYYY-MM-DD",
+ "netAmount": αριθμός καθαρής αξίας χωρίς ΦΠΑ,
+ "vatAmount": αριθμός συνολικού ΦΠΑ,
+ "vatRate": αριθμός κύριου συντελεστή ΦΠΑ (π.χ. 13 ή 24, χωρίς το % σύμβολο),
+ "grossAmount": αριθμός τελικού συνόλου πληρωμής,
+ "hasQr": true/false αν υπάρχει QR κωδικός στο παραστατικό,
+ "amountConfident": true/false αν είσαι σίγουρος για το συνολικό ποσό,
+ "supplierConfident": true/false αν είσαι σίγουρος για το όνομα του προμηθευτή
+}
+Αν κάποιο πεδίο δεν φαίνεται καθαρά, βάλε 0 για αριθμούς ή κενό string για κείμενο, αλλά βάλε το αντίστοιχο confident σε false.
+Μην γράψεις τίποτα άλλο εκτός από το JSON.`;
+
+async function callOpenRouterVision(dataUrl, apiKey, model){
+  const body = {
+    model: model,
+    messages: [{
+      role: "user",
+      content: [
+        {type:"text", text: EXTRACTION_PROMPT},
+        {type:"image_url", image_url:{url: dataUrl}}
+      ]
+    }],
+    temperature: 0.1
+  };
+  const resp = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Authorization": "Bearer " + apiKey,
+      "Content-Type": "application/json",
+      "HTTP-Referer": location.href,
+      "X-Title": "Τιμολόγια Προμηθευτών"
+    },
+    body: JSON.stringify(body)
+  });
+  if(!resp.ok){
+    const t = await resp.text().catch(()=>"");
+    throw new Error("HTTP " + resp.status + " " + t.slice(0,200));
+  }
+  const data = await resp.json();
+  const text = data?.choices?.[0]?.message?.content || "";
+  return text;
+}
+
+function parseJsonLoose(text){
+  let t = text.trim();
+  t = t.replace(/^```json/i,"").replace(/^```/,"").replace(/```$/,"").trim();
+  const start = t.indexOf("{");
+  const end = t.lastIndexOf("}");
+  if(start>=0 && end>start) t = t.slice(start, end+1);
+  return JSON.parse(t);
+}
+
+async function extractInvoiceData(file){
+  const apiKey = state.config.apiKey;
+  if(!apiKey) throw new Error("NO_API_KEY");
+  const dataUrl = await fileToDataUrl(file);
+  const modelsToTry = [state.config.model].concat(FALLBACK_MODELS.filter(m=>m!==state.config.model));
+  let lastErr = null;
+  for(const model of modelsToTry){
+    try{
+      const text = await callOpenRouterVision(dataUrl, apiKey, model);
+      const parsed = parseJsonLoose(text);
+      return {parsed, dataUrl, modelUsed: model};
+    }catch(e){ lastErr = e; }
+  }
+  throw lastErr || new Error("Αποτυχία εξαγωγής δεδομένων.");
+}
+
+/* ============================= UI ============================= */
+
+const root = document.getElementById("root");
+
+function render(){
+  let html = "";
+  html += renderTopbar();
+  html += `<div class="wrap">`;
+  if(!state.unlocked){
+    html += renderLockedHome();
+  } else if(state.screen === "supplier"){
+    html += renderSupplierScreen();
+  } else if(state.screen === "settings"){
+    html += renderSettingsScreen();
+  } else {
+    html += renderHome();
+  }
+  html += `</div>`;
+  if(state.unlocked) html += renderBottomNav();
+  root.innerHTML = html;
+  if(state.sheet) renderSheet();
+  bindEvents();
+}
+
+function renderTopbar(){
+  return `
+  <div class="topbar">
+    <div>
+      <div class="title">Τιμολόγια Προμηθευτών</div>
+      <div class="sub">${folderReady ? "Συνδεδεμένος κοινός φάκελος" : "Χωρίς κοινό φάκελο — τοπική αποθήκευση"} · έκδ. ${APP_VERSION}</div>
+    </div>
+    ${state.unlocked ? `<button class="iconbtn" data-act="lock">Κλείδωμα</button>` : ""}
+  </div>`;
+}
+
+function renderBottomNav(){
+  const isAdmin = true; // το unlock γίνεται πάντα με το PIN διαχειριστή σε αυτή την έκδοση
+  return `
+  <div class="bottom-nav">
+    <button data-act="go-home" class="${state.screen==='home'?'active':''}"><span class="ic">🏠</span>Αρχική</button>
+    <button data-act="open-add" class="${state.screen==='add'?'active':''}"><span class="ic">📷</span>Νέο τιμολόγιο</button>
+    <button data-act="go-settings" class="${state.screen==='settings'?'active':''}"><span class="ic">⚙️</span>Ρυθμίσεις</button>
+  </div>`;
+}
+
+/* -------- Κλειδωμένη αρχική: επιλογή προσωπικού ή διαχειριστή -------- */
+
+function renderLockedHome(){
+  const staff = state.config.staff || [];
+  return `
+  <div class="card">
+    <h2>Καλώς ήρθες</h2>
+    <p class="muted">Επίλεξε το όνομά σου για να καταχωρήσεις τιμολόγιο, ή μπες ως διαχειριστής για πλήρη πρόσβαση.</p>
+    <div style="margin:10px 0 4px;">
+      ${staff.length ? staff.map(s=>`<span class="staff-chip ${state.currentStaff===s?'sel':''}" data-act="pick-staff" data-name="${escapeHtml(s)}">${escapeHtml(s)}</span>`).join("") : `<span class="muted">Δεν έχουν καταχωρηθεί ονόματα προσωπικού ακόμη.</span>`}
+    </div>
+    <div class="divider"></div>
+    <button class="btn" data-act="staff-continue" ${state.currentStaff?"":"disabled"}>Συνέχεια ως ${state.currentStaff?escapeHtml(state.currentStaff):"προσωπικό"}</button>
+    <div style="height:10px"></div>
+    <button class="btn secondary" data-act="admin-login">Είσοδος διαχειριστή</button>
+  </div>`;
+}
+
+/* -------------------------------- Αρχική -------------------------------- */
+
+function renderHome(){
+  const suppliers = suppliersSummary();
+  const totalOwed = suppliers.reduce((a,s)=>a+Math.max(0,s.balance),0);
+  let html = `
+  <div class="card">
+    <div class="row"><div class="muted">Σύνολο οφειλών σε προμηθευτές</div></div>
+    <div class="big">${fmtMoney(totalOwed)}</div>
+  </div>`;
+  if(!suppliers.length){
+    html += `<div class="empty">Δεν υπάρχουν ακόμη καταχωρημένα τιμολόγια.<br>Πάτησε «Νέο τιμολόγιο» από κάτω για να ξεκινήσεις.</div>`;
+  } else {
+    html += `<div class="card">`;
+    for(const s of suppliers){
+      html += `
+      <div class="list-item" data-act="open-supplier" data-key="${escapeHtml(s.key)}" style="cursor:pointer;">
+        <div>
+          <div style="font-weight:600;">${escapeHtml(s.name)}</div>
+          <div class="muted">${s.invoices.length} τιμολόγια</div>
+        </div>
+        <div style="text-align:right;">
+          <div class="big" style="font-size:16px;">${fmtMoney(s.balance)}</div>
+          <span class="pill ${s.balance>0.009?'owe':'ok'}">${s.balance>0.009?'Οφειλή':'Εξοφλημένο'}</span>
+        </div>
+      </div>`;
+    }
+    html += `</div>`;
+  }
+  return html;
+}
+
+/* -------------------------------- Καρτέλα προμηθευτή -------------------------------- */
+
+function renderSupplierScreen(){
+  const suppliers = suppliersSummary();
+  const s = suppliers.find(x=>x.key===state.openSupplierKey);
+  if(!s){
+    state.screen = "home";
+    return renderHome();
+  }
+  let html = `
+  <button class="iconbtn" data-act="go-home" style="margin-bottom:10px;">← Πίσω</button>
+  <div class="card">
+    <h2>${escapeHtml(s.name)}</h2>
+    <div class="muted">${s.phone?`<a class="linklike" data-act="copy" data-val="${escapeHtml(s.phone)}">${escapeHtml(s.phone)}</a> &nbsp;·&nbsp; <a href="tel:${escapeHtml(s.phone.replace(/\\D/g,''))}">κλήση</a>`:"χωρίς τηλέφωνο"}</div>
+    ${s.afm?`<div class="muted">ΑΦΜ: ${escapeHtml(s.afm)}</div>`:""}
+    ${s.address?`<div class="muted">${escapeHtml(s.address)}</div>`:""}
+    ${s.email?`<div class="muted"><a class="linklike" href="mailto:${escapeHtml(s.email)}">${escapeHtml(s.email)}</a></div>`:""}
+    <div class="divider"></div>
+    <div class="row"><div>Σύνολο τιμολογίων</div><div>${fmtMoney(s.totalInvoiced)}</div></div>
+    <div class="row"><div>Πληρωμές</div><div>${fmtMoney(s.totalPaid)}</div></div>
+    <div class="row"><div style="font-weight:700;">Υπόλοιπο</div><div style="font-weight:700;">${fmtMoney(s.balance)}</div></div>
+    <div style="height:10px"></div>
+    <button class="btn" data-act="open-payment" data-key="${escapeHtml(s.key)}">Καταχώρηση πληρωμής</button>
+  </div>
+  <div class="card">
+    <h3>Τιμολόγια</h3>`;
+  for(const inv of [...s.invoices].reverse()){
+    html += `
+    <div class="list-item">
+      <div>
+        <div style="font-weight:600;">${fmtDate(inv.date)}</div>
+        <div class="muted">${inv.paymentType==='μετρητοίς'?'Μετρητοίς':'Επί πιστώσει'} ${inv.who?('· '+escapeHtml(inv.who)):''}</div>
+      </div>
+      <div style="text-align:right;">${fmtMoney(inv.grossAmount)}</div>
+    </div>`;
+  }
+  html += `</div>`;
+  const pays = supplierPayments(s.key);
+  if(pays.length){
+    html += `<div class="card"><h3>Πληρωμές</h3>`;
+    for(const p of [...pays].reverse()){
+      html += `<div class="list-item"><div>${fmtDate(p.date)} <span class="muted">${escapeHtml(p.note||"")}</span></div><div>${fmtMoney(p.amount)}</div></div>`;
+    }
+    html += `</div>`;
+  }
+  return html;
+}
+
+/* -------------------------------- Ρυθμίσεις -------------------------------- */
+
+function renderSettingsScreen(){
+  const cfg = state.config;
+  return `
+  <div class="card">
+    <h2>Κοινός φάκελος</h2>
+    <p class="muted">Σύνδεσε έναν φάκελο που συγχρονίζεται μέσω Google Drive, ώστε τα τιμολόγια να φαίνονται σε όλες τις συσκευές.</p>
+    <button class="btn secondary" data-act="connect-folder">${folderReady?"Επανασύνδεση φακέλου":"Σύνδεση κοινού φακέλου"}</button>
+  </div>
+  <div class="card">
+    <h2>Τεχνητή νοημοσύνη (OpenRouter)</h2>
+    <p class="muted">Δωρεάν κλειδί, χωρίς κάρτα — από <a class="linklike" href="https://openrouter.ai/keys" target="_blank">openrouter.ai/keys</a>.</p>
+    <label>Κλειδί API</label>
+    <input id="f-apikey" type="text" value="${escapeHtml(cfg.apiKey||"")}" placeholder="sk-or-v1-...">
+    <label>Μοντέλο (προχωρημένο, προαιρετικό)</label>
+    <input id="f-model" type="text" value="${escapeHtml(cfg.model||DEFAULT_MODEL)}">
+    <div style="height:10px"></div>
+    <button class="btn secondary" data-act="save-ai">Αποθήκευση</button>
+  </div>
+  <div class="card">
+    <h2>Συντελεστές ΦΠΑ</h2>
+    ${renderReorderList(cfg.vatRates.map(r=>r+"%"), "vat")}
+    <div style="display:flex;gap:8px;margin-top:8px;">
+      <input id="f-newvat" type="number" placeholder="π.χ. 6" style="flex:1;">
+      <button class="btn small" data-act="add-vat">Προσθήκη</button>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Προσωπικό</h2>
+    ${renderReorderList(cfg.staff, "staff")}
+    <div style="display:flex;gap:8px;margin-top:8px;">
+      <input id="f-newstaff" type="text" placeholder="Όνομα υπαλλήλου" style="flex:1;">
+      <button class="btn small" data-act="add-staff">Προσθήκη</button>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Κωδικός διαχειριστή</h2>
+    <label>Νέος κωδικός (4 ψηφία)</label>
+    <input id="f-pin" type="text" maxlength="4" inputmode="numeric" placeholder="${cfg.adminPin}">
+    <div style="height:10px"></div>
+    <button class="btn secondary" data-act="save-pin">Αλλαγή κωδικού</button>
+  </div>
+  <div class="card">
+    <h2>Εξαγωγή σε Excel</h2>
+    <button class="btn secondary" data-act="export-excel">Εξαγωγή τιμολογίων για τον λογιστή</button>
+  </div>
+  <div class="card">
+    <h2>Έκδοση</h2>
+    <div class="muted">Έκδοση ${APP_VERSION}</div>
+    <div style="height:8px"></div>
+    <button class="btn secondary small" data-act="check-update">Έλεγχος για ενημέρωση</button>
+  </div>`;
+}
+
+function renderReorderList(items, kind){
+  if(!items.length) return `<div class="muted">Δεν υπάρχουν ακόμη καταχωρήσεις.</div>`;
+  let html = "";
+  items.forEach((it,i)=>{
+    html += `
+    <div class="reorder-row">
+      <div class="arrows">
+        <button data-act="move-${kind}" data-dir="up" data-i="${i}" ${i===0?"disabled":""}>▲</button>
+        <button data-act="move-${kind}" data-dir="down" data-i="${i}" ${i===items.length-1?"disabled":""}>▼</button>
+      </div>
+      <div style="flex:1;">${escapeHtml(String(it))}</div>
+      <button class="iconbtn" data-act="del-${kind}" data-i="${i}">Αφαίρεση</button>
+    </div>`;
+  });
+  return html;
+}
+
+/* -------------------------------- Φόρμα νέου τιμολογίου (sheet) -------------------------------- */
+
+function openAddInvoiceSheet(){
+  state.sheet = {type:"add-invoice", step:"capture", file:null, extracted:null, dataUrl:null};
+  render();
+}
+
+function sheetAddInvoiceHtml(s){
+  if(s.step === "capture"){
+    return `
+    <h2>Νέο τιμολόγιο</h2>
+    <p class="muted">Φωτογράφισε ή ανέβασε το τιμολόγιο.</p>
+    <div style="position:relative;">
+      <button class="btn">📷 Φωτογραφία</button>
+      <input type="file" accept="image/*" capture="environment" data-act="capture-photo"
+        style="position:absolute;inset:0;opacity:0;cursor:pointer;">
+    </div>
+    <div style="height:10px"></div>
+    <div style="position:relative;">
+      <button class="btn secondary">🖼️ Επιλογή από συλλογή</button>
+      <input type="file" accept="image/*" data-act="capture-gallery"
+        style="position:absolute;inset:0;opacity:0;cursor:pointer;">
+    </div>
+    <div style="height:10px"></div>
+    <button class="btn secondary" data-act="close-sheet">Άκυρο</button>`;
+  }
+  if(s.step === "loading"){
+    return `<div class="loader"><div class="spin"></div><div>Ανάλυση τιμολογίου με τεχνητή νοημοσύνη…</div></div>`;
+  }
+  if(s.step === "error"){
+    return `
+    <h2>Δεν έγινε η ανάλυση</h2>
+    <div class="badbox">${escapeHtml(s.errorMsg||"Άγνωστο σφάλμα.")}</div>
+    <button class="btn secondary" data-act="manual-entry">Συνέχεια με μη αυτόματη καταχώρηση</button>
+    <div style="height:8px"></div>
+    <button class="btn" data-act="retry-capture">Δοκίμασε άλλη φωτογραφία</button>`;
+  }
+  if(s.step === "confirm"){
+    const d = s.extracted || {};
+    let warn = "";
+    if(d.isInvoice === false) warn += `<div class="warnbox">Το AI δεν είναι σίγουρο ότι αυτό είναι τιμολόγιο: ${escapeHtml(d.notInvoiceReason||"")}. Έλεγξε τα στοιχεία πριν αποθηκεύσεις.</div>`;
+    if(d.amountConfident === false) warn += `<div class="warnbox">Το ποσό δεν διαβάστηκε με σιγουριά — έλεγξέ το.</div>`;
+    if(d.supplierConfident === false) warn += `<div class="warnbox">Το όνομα προμηθευτή δεν διαβάστηκε με σιγουριά — έλεγξέ το.</div>`;
+    return `
+    <h2>Επιβεβαίωση στοιχείων</h2>
+    ${s.dataUrl?`<div class="thumb-row"><img src="${s.dataUrl}"></div>`:""}
+    ${warn}
+    <label>Προμηθευτής</label>
+    <input id="f-supplier" value="${escapeHtml(d.supplierName||"")}">
+    <div class="grid2">
+      <div><label>Ημερομηνία</label><input id="f-date" type="date" value="${escapeHtml(d.date||todayISO())}"></div>
+      <div><label>ΑΦΜ</label><input id="f-afm" value="${escapeHtml(d.afm||"")}"></div>
+    </div>
+    <div class="grid2">
+      <div><label>Τηλέφωνο</label><input id="f-phone" value="${escapeHtml(d.phone||"")}"></div>
+      <div><label>Email</label><input id="f-email" value="${escapeHtml(d.email||"")}"></div>
+    </div>
+    <label>Διεύθυνση</label>
+    <input id="f-address" value="${escapeHtml(d.address||"")}">
+    <div class="grid2">
+      <div><label>Καθαρή αξία (€)</label><input id="f-net" type="number" step="0.01" value="${d.netAmount||""}"></div>
+      <div><label>ΦΠΑ (€)</label><input id="f-vat" type="number" step="0.01" value="${d.vatAmount||""}"></div>
+    </div>
+    <div class="grid2">
+      <div><label>Συντελεστής ΦΠΑ</label>
+        <select id="f-vatrate">
+          ${state.config.vatRates.map(r=>`<option value="${r}" ${Number(d.vatRate)===r?"selected":""}>${r}%</option>`).join("")}
+        </select>
+      </div>
+      <div><label>Σύνολο (€)</label><input id="f-gross" type="number" step="0.01" value="${d.grossAmount||""}"></div>
+    </div>
+    <label style="font-weight:700;color:var(--ink);">Τρόπος πληρωμής</label>
+    <select id="f-paytype">
+      <option value="μετρητοίς" ${state.currentStaff?"selected":""}>Μετρητοίς</option>
+      <option value="επί πιστώσει">Επί πιστώσει</option>
+    </select>
+    <div style="height:12px"></div>
+    <button class="btn" data-act="save-invoice">Αποθήκευση τιμολογίου</button>
+    <div style="height:8px"></div>
+    <button class="btn secondary" data-act="close-sheet">Άκυρο</button>`;
+  }
+  return "";
+}
+
+/* -------------------------------- Φόρμα πληρωμής (sheet) -------------------------------- */
+
+function sheetPaymentHtml(s){
+  const supplier = suppliersSummary().find(x=>x.key===s.key);
+  return `
+  <h2>Πληρωμή — ${escapeHtml(supplier?.name||"")}</h2>
+  <div class="muted">Τρέχον υπόλοιπο: ${fmtMoney(supplier?.balance||0)}</div>
+  <label>Ποσό (€)</label>
+  <input id="f-pay-amount" type="number" step="0.01">
+  <label>Ημερομηνία</label>
+  <input id="f-pay-date" type="date" value="${todayISO()}">
+  <label>Σημείωση (προαιρετικό)</label>
+  <input id="f-pay-note" type="text" placeholder="π.χ. μετρητά, τραπεζική κατάθεση">
+  <div style="height:10px"></div>
+  <button class="btn" data-act="save-payment" data-key="${escapeHtml(s.key)}">Αποθήκευση πληρωμής</button>
+  <div style="height:8px"></div>
+  <button class="btn secondary" data-act="close-sheet">Άκυρο</button>`;
+}
+
+/* -------------------------------- PIN sheet -------------------------------- */
+
+function sheetPinHtml(s){
+  const len = (s.pin||"").length;
+  return `
+  <h2>Κωδικός διαχειριστή</h2>
+  <div class="pin-dots">${[0,1,2,3].map(i=>`<div class="pin-dot ${i<len?'filled':''}"></div>`).join("")}</div>
+  ${s.error?`<div class="badbox">Λάθος κωδικός.</div>`:""}
+  <div class="keypad">
+    ${[1,2,3,4,5,6,7,8,9].map(n=>`<button data-act="pin-digit" data-d="${n}">${n}</button>`).join("")}
+    <button data-act="pin-clear">Καθαρισμός</button>
+    <button data-act="pin-digit" data-d="0">0</button>
+    <button data-act="close-sheet">Άκυρο</button>
+  </div>`;
+}
+
+/* -------------------------------- Γενικός renderer sheet -------------------------------- */
+
+function renderSheet(){
+  const s = state.sheet;
+  let inner = "";
+  let center = false;
+  if(s.type === "add-invoice") inner = sheetAddInvoiceHtml(s);
+  else if(s.type === "payment") inner = sheetPaymentHtml(s);
+  else if(s.type === "pin"){ inner = sheetPinHtml(s); center = true; }
+  const overlay = document.createElement("div");
+  overlay.className = "sheet-overlay" + (center?" center-sheet":"");
+  overlay.innerHTML = `<div class="sheet"><div class="sheet-handle"></div>${inner}</div>`;
+  overlay.addEventListener("click", (e)=>{ if(e.target===overlay) closeSheet(); });
+  document.body.appendChild(overlay);
+}
+
+function closeSheet(){
+  state.sheet = null;
+  document.querySelectorAll(".sheet-overlay").forEach(e=>e.remove());
+  render();
+}
+
+/* ============================= Ενέργειες ============================= */
+
+function bindEvents(){
+  document.querySelectorAll("[data-act]").forEach(el=>{
+    const act = el.getAttribute("data-act");
+    if(el.tagName === "INPUT" && el.type === "file"){
+      el.addEventListener("change", (e)=>onFileChosen(e.target.files[0]));
+      return;
+    }
+    el.addEventListener("click", (e)=>handleAction(act, el, e));
+  });
+}
+
+async function handleAction(act, el){
+  switch(act){
+    case "lock":
+      state.unlocked = false; state.currentStaff = null; persistLocal(); render(); break;
+    case "pick-staff":
+      state.currentStaff = el.getAttribute("data-name"); persistLocal(); render(); break;
+    case "staff-continue":
+      state.unlocked = true; persistLocal(); render();
+      openAddInvoiceSheet(); break;
+    case "admin-login":
+      state.sheet = {type:"pin", pin:"", error:false}; render(); break;
+    case "pin-digit":
+      {
+        const d = el.getAttribute("data-d");
+        state.sheet.pin = (state.sheet.pin||"") + d;
+        state.sheet.error = false;
+        if(state.sheet.pin.length === 4){
+          if(state.sheet.pin === state.config.adminPin){
+            state.unlocked = true; state.currentStaff = "Διαχειριστής";
+            persistLocal();
+            closeSheet();
+            return;
+          } else {
+            state.sheet.error = true;
+            setTimeout(()=>{ state.sheet.pin=""; state.sheet.error=false; render(); }, 650);
+          }
+        }
+        render();
+      } break;
+    case "pin-clear":
+      state.sheet.pin = ""; state.sheet.error = false; render(); break;
+    case "close-sheet": closeSheet(); break;
+    case "go-home": state.screen="home"; state.sheet=null; render(); break;
+    case "go-settings": state.screen="settings"; state.sheet=null; render(); break;
+    case "open-add": openAddInvoiceSheet(); break;
+    case "open-supplier":
+      state.openSupplierKey = el.getAttribute("data-key");
+      state.screen = "supplier"; render(); break;
+    case "open-payment":
+      state.sheet = {type:"payment", key: el.getAttribute("data-key")}; render(); break;
+    case "copy":
+      try{ await navigator.clipboard.writeText(el.getAttribute("data-val")); toast("Αντιγράφηκε."); }
+      catch(e){ toast("Δεν ήταν δυνατή η αντιγραφή."); } break;
+    case "connect-folder":
+      await connectFolder();
+      await syncFromFolder();
+      render(); break;
+    case "save-ai":
+      state.config.apiKey = document.getElementById("f-apikey").value.trim();
+      state.config.model = document.getElementById("f-model").value.trim() || DEFAULT_MODEL;
+      persistLocal(); await writeConfigFile(state.config); toast("Αποθηκεύτηκε."); break;
+    case "add-vat":
+      {
+        const v = Number(document.getElementById("f-newvat").value);
+        if(v>0 && !state.config.vatRates.includes(v)){
+          state.config.vatRates.push(v); persistLocal(); await writeConfigFile(state.config);
+        }
+        render();
+      } break;
+    case "del-vat":
+      state.config.vatRates.splice(Number(el.getAttribute("data-i")),1);
+      persistLocal(); await writeConfigFile(state.config); render(); break;
+    case "move-vat": moveItem(state.config.vatRates, Number(el.getAttribute("data-i")), el.getAttribute("data-dir"));
+      persistLocal(); await writeConfigFile(state.config); render(); break;
+    case "add-staff":
+      {
+        const v = document.getElementById("f-newstaff").value.trim();
+        if(v && !state.config.staff.includes(v)){
+          state.config.staff.push(v); persistLocal(); await writeConfigFile(state.config);
+        }
+        render();
+      } break;
+    case "del-staff":
+      state.config.staff.splice(Number(el.getAttribute("data-i")),1);
+      persistLocal(); await writeConfigFile(state.config); render(); break;
+    case "move-staff": moveItem(state.config.staff, Number(el.getAttribute("data-i")), el.getAttribute("data-dir"));
+      persistLocal(); await writeConfigFile(state.config); render(); break;
+    case "save-pin":
+      {
+        const v = document.getElementById("f-pin").value.trim();
+        if(/^\d{4}$/.test(v)){
+          state.config.adminPin = v; persistLocal(); await writeConfigFile(state.config); toast("Ο κωδικός άλλαξε.");
+        } else toast("Ο κωδικός πρέπει να έχει 4 ψηφία.");
+        render();
+      } break;
+    case "export-excel": exportInvoicesToExcel(); break;
+    case "check-update": location.href = location.pathname + "?v=" + Date.now(); break;
+    case "manual-entry":
+      state.sheet.step = "confirm"; state.sheet.extracted = {date: todayISO()}; render(); break;
+    case "retry-capture":
+      state.sheet.step = "capture"; render(); break;
+    case "save-invoice": await saveInvoiceFromForm(); break;
+    case "save-payment": await savePaymentFromForm(el.getAttribute("data-key")); break;
+  }
+}
+
+function moveItem(arr, i, dir){
+  const j = dir==="up" ? i-1 : i+1;
+  if(j<0 || j>=arr.length) return;
+  [arr[i], arr[j]] = [arr[j], arr[i]];
+}
+
+async function onFileChosen(file){
+  if(!file) return;
+  state.sheet.file = file;
+  state.sheet.step = "loading";
+  render();
+  try{
+    const dataUrl = await fileToDataUrl(file);
+    const {parsed} = await extractInvoiceData(file);
+    state.sheet.extracted = parsed;
+    state.sheet.dataUrl = dataUrl;
+    state.sheet.step = "confirm";
+  }catch(e){
+    console.error(e);
+    state.sheet.step = "error";
+    state.sheet.errorMsg = (e && e.message === "NO_API_KEY")
+      ? "Δεν έχει καταχωρηθεί κλειδί OpenRouter στις Ρυθμίσεις."
+      : ("Η ανάλυση απέτυχε: " + (e && e.message ? e.message : "άγνωστο σφάλμα"));
+  }
+  render();
+}
+
+async function saveInvoiceFromForm(){
+  const inv = {
+    id: uid("inv"),
+    supplierName: document.getElementById("f-supplier").value.trim(),
+    date: document.getElementById("f-date").value || todayISO(),
+    afm: document.getElementById("f-afm").value.trim(),
+    phone: document.getElementById("f-phone").value.trim(),
+    email: document.getElementById("f-email").value.trim(),
+    address: document.getElementById("f-address").value.trim(),
+    netAmount: Number(document.getElementById("f-net").value)||0,
+    vatAmount: Number(document.getElementById("f-vat").value)||0,
+    vatRate: Number(document.getElementById("f-vatrate").value)||0,
+    grossAmount: Number(document.getElementById("f-gross").value)||0,
+    paymentType: document.getElementById("f-paytype").value,
+    who: state.currentStaff || "",
+    createdAt: Date.now()
+  };
+  if(!inv.supplierName){ toast("Συμπλήρωσε το όνομα προμηθευτή."); return; }
+  if(folderReady){
+    try{ await writeJsonFile(invDirHandle, inv.id + ".json", inv); }
+    catch(e){ console.error(e); state.invoices.push(inv); LS.set("tim_invoices_local", state.invoices); }
+  } else {
+    state.invoices.push(inv); LS.set("tim_invoices_local", state.invoices);
+  }
+  if(folderReady) folderInvoices.push(inv);
+  closeSheet();
+  state.screen = "home";
+  toast("Το τιμολόγιο αποθηκεύτηκε.");
+  render();
+}
+
+async function savePaymentFromForm(key){
+  const supplier = suppliersSummary().find(x=>x.key===key);
+  const amount = Number(document.getElementById("f-pay-amount").value)||0;
+  if(amount<=0){ toast("Βάλε ένα έγκυρο ποσό."); return; }
+  const p = {
+    id: uid("pay"),
+    supplierName: supplier ? supplier.name : "",
+    amount,
+    date: document.getElementById("f-pay-date").value || todayISO(),
+    note: document.getElementById("f-pay-note").value.trim(),
+    createdAt: Date.now()
+  };
+  if(folderReady){
+    try{ await writeJsonFile(payDirHandle, p.id + ".json", p); }
+    catch(e){ state.payments.push(p); LS.set("tim_payments_local", state.payments); }
+  } else {
+    state.payments.push(p); LS.set("tim_payments_local", state.payments);
+  }
+  if(folderReady) folderPayments.push(p);
+  closeSheet();
+  toast("Η πληρωμή καταχωρήθηκε.");
+  render();
+}
+
+function exportInvoicesToExcel(){
+  const invoices = allInvoices();
+  if(!invoices.length){ toast("Δεν υπάρχουν τιμολόγια για εξαγωγή."); return; }
+  const rows = invoices.map(inv=>({
+    "Προμηθευτής": inv.supplierName,
+    "ΑΦΜ": inv.afm||"",
+    "Ημερομηνία": fmtDate(inv.date),
+    "Καθαρή αξία": inv.netAmount||0,
+    "ΦΠΑ": inv.vatAmount||0,
+    "Συντελεστής ΦΠΑ": inv.vatRate?inv.vatRate+"%":"",
+    "Σύνολο": inv.grossAmount||0,
+    "Τρόπος πληρωμής": inv.paymentType||"",
+    "Καταχωρήθηκε από": inv.who||""
+  }));
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Τιμολόγια");
+  XLSX.writeFile(wb, "Τιμολόγια_Προμηθευτών_" + todayISO() + ".xlsx");
+}
+
+/* ============================= Εκκίνηση ============================= */
+
+async function boot(){
+  await tryAutoConnectFolder();
+  if(folderReady) await syncFromFolder();
+  render();
+  // Περιοδικό ανανέωση για να φαίνονται τιμολόγια που πρόσθεσε άλλη συσκευή
+  // μέσω του συγχρονισμού του Google Drive.
+  setInterval(async ()=>{
+    if(!folderReady) return;
+    await syncFromFolder();
+    if(state.unlocked && (state.screen==="home" || state.screen==="supplier")) render();
+  }, 25000);
+}
+boot();
+
+</script>
+</body>
+</html>
