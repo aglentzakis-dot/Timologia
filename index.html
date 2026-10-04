@@ -77,6 +77,10 @@
     border-radius:999px;padding:6px 12px;font-size:13px;font-weight:600;margin:4px 6px 0 0;cursor:pointer;
     border:1px solid var(--line);}
   .staff-chip.sel{background:var(--accent);color:#fff;border-color:var(--accent);}
+  .toggle2{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+  .toggle2-btn{padding:11px 10px;border-radius:10px;border:2px solid var(--line);
+    background:#fff;color:var(--ink);font-size:14px;font-weight:700;cursor:pointer;text-align:center;}
+  .toggle2-btn.active{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);}
   .pin-dots{display:flex;gap:12px;justify-content:center;margin:16px 0;}
   .pin-dot{width:14px;height:14px;border-radius:50%;border:1px solid var(--line);background:#fff;}
   .pin-dot.filled{background:var(--accent);border-color:var(--accent);}
@@ -114,6 +118,7 @@
 
 <script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="backup.js"></script>
+<script src="apps-strip.js"></script>
 <script>
 "use strict";
 
@@ -125,7 +130,7 @@
    κλειδί OpenRouter (χωρίς κάρτα), όπως στο Identify-AI.
    ========================================================================= */
 
-const APP_VERSION = "1.7.0";
+const APP_VERSION = "1.9.0";
 const DEFAULT_PIN = "1111";
 const DEFAULT_MODEL = ""; // κενό = αυτόματη εύρεση δωρεάν μοντέλου με εικόνα
 const MODEL_LIST_CACHE_KEY = "tim_free_vision_models";
@@ -631,6 +636,8 @@ function render(){
     html += renderSupplierScreen();
   } else if(state.screen === "settings"){
     html += renderSettingsScreen();
+  } else if(state.screen === "apps-page"){
+    html += renderOurAppsScreen();
   } else {
     html += renderHome();
   }
@@ -717,6 +724,9 @@ function renderHome(){
     }
     html += `</div>`;
   }
+  if(typeof AppsStripModule !== "undefined"){
+    html += AppsStripModule.renderStrip();
+  }
   return html;
 }
 
@@ -767,6 +777,18 @@ function renderSupplierScreen(){
     html += `</div>`;
   }
   return html;
+}
+
+/* -------------------------------- Οι εφαρμογές μας -------------------------------- */
+
+function renderOurAppsScreen(){
+  return `
+  <button class="iconbtn" data-act="go-settings" style="margin-bottom:10px;">← Πίσω στις ρυθμίσεις</button>
+  <div class="card">
+    <h2>Οι εφαρμογές μας</h2>
+    <p class="muted">Άλλες εφαρμογές του ίδιου δημιουργού. Μπορείς να πεις «Δεν με ενδιαφέρει» σε όποια θέλεις — δεν θα σου προταθεί ξανά, εκτός αν αλλάξεις γνώμη από εδώ.</p>
+    ${typeof AppsStripModule!=="undefined" ? AppsStripModule.renderOurAppsPage() : `<div class="muted">Το άρθρωμα δεν φορτώθηκε.</div>`}
+  </div>`;
 }
 
 /* -------------------------------- Ρυθμίσεις -------------------------------- */
@@ -840,6 +862,11 @@ function renderSettingsScreen(){
     <h2>Αντίγραφα ασφαλείας</h2>
     <p class="muted">Ξεχωριστό από τον κοινό φάκελο ζωντανών δεδομένων — πλήρες στιγμιότυπο όλων των τιμολογίων, πληρωμών και ρυθμίσεων, με πολλαπλούς προορισμούς και επαναφορά.</p>
     ${typeof BackupModule!=="undefined" ? BackupModule.renderButton() : `<div class="muted">Το άρθρωμα αντιγράφων δεν φορτώθηκε.</div>`}
+  </div>
+  <div class="card">
+    <h2>Άλλες εφαρμογές</h2>
+    <p class="muted">Δες όλες τις εφαρμογές μας σε μία λίστα.</p>
+    <button class="btn secondary" data-act="go-apps-page">Οι εφαρμογές μας</button>
   </div>
   <div class="card">
     <h2>Έκδοση</h2>
@@ -948,11 +975,12 @@ function sheetAddInvoiceHtml(s){
           ${state.config.vatRates.map(r=>`<option value="${r}" ${Number(d.vatRate)===r?"selected":""}>${r}%</option>`).join("")}
         </select>
         <div style="background:#eef3ef;border:2px solid var(--accent);border-radius:10px;padding:8px 10px;margin-top:10px;">
-          <label style="font-weight:800;color:var(--accent);margin:0 0 4px;font-size:13px;">Τρόπος πληρωμής</label>
-          <select id="r-paytype-${i}" style="font-weight:700;">
-            <option value="μετρητοίς" ${(d.paymentType||"μετρητοίς")==="μετρητοίς"?"selected":""}>Μετρητοίς</option>
-            <option value="επί πιστώσει" ${d.paymentType==="επί πιστώσει"?"selected":""}>Επί πιστώσει</option>
-          </select>
+          <label style="font-weight:800;color:var(--accent);margin:0 0 4px;font-size:13px;">Τρόπος πληρωμής *</label>
+          <input type="hidden" id="r-paytype-${i}" value="${escapeHtml(d.paymentType||"")}">
+          <div class="toggle2">
+            <button type="button" class="toggle2-btn ${d.paymentType==="μετρητοίς"?"active":""}" data-act="pick-paytype" data-target="r-paytype-${i}" data-val="μετρητοίς">Μετρητοίς</button>
+            <button type="button" class="toggle2-btn ${d.paymentType==="επί πιστώσει"?"active":""}" data-act="pick-paytype" data-target="r-paytype-${i}" data-val="επί πιστώσει">Επί πιστώσει</button>
+          </div>
         </div>
       </div>`;
     });
@@ -995,11 +1023,12 @@ function sheetAddInvoiceHtml(s){
     ${warn}
     ${dupHtml}
     <div style="background:#eef3ef;border:2px solid var(--accent);border-radius:10px;padding:10px 12px;margin-bottom:10px;">
-      <label style="font-weight:800;color:var(--accent);margin:0 0 6px;font-size:15px;">Τρόπος πληρωμής</label>
-      <select id="f-paytype" style="font-weight:700;">
-        <option value="μετρητοίς" ${(d.paymentType||"μετρητοίς")==="μετρητοίς"?"selected":""}>Μετρητοίς</option>
-        <option value="επί πιστώσει" ${d.paymentType==="επί πιστώσει"?"selected":""}>Επί πιστώσει</option>
-      </select>
+      <label style="font-weight:800;color:var(--accent);margin:0 0 6px;font-size:15px;">Τρόπος πληρωμής *</label>
+      <input type="hidden" id="f-paytype" value="${escapeHtml(d.paymentType||"")}">
+      <div class="toggle2">
+        <button type="button" class="toggle2-btn ${d.paymentType==="μετρητοίς"?"active":""}" data-act="pick-paytype" data-target="f-paytype" data-val="μετρητοίς">Μετρητοίς</button>
+        <button type="button" class="toggle2-btn ${d.paymentType==="επί πιστώσει"?"active":""}" data-act="pick-paytype" data-target="f-paytype" data-val="επί πιστώσει">Επί πιστώσει</button>
+      </div>
     </div>
     <label>Προμηθευτής</label>
     <input id="f-supplier" value="${escapeHtml(d.supplierName||"")}">
@@ -1195,6 +1224,7 @@ async function handleAction(act, el){
     case "close-sheet": closeSheet(); break;
     case "go-home": state.screen="home"; state.sheet=null; render(); break;
     case "go-settings": state.screen="settings"; state.sheet=null; render(); break;
+    case "go-apps-page": state.screen="apps-page"; state.sheet=null; render(); break;
     case "open-add": openAddInvoiceSheet(); break;
     case "open-supplier":
       state.openSupplierKey = el.getAttribute("data-key");
@@ -1278,6 +1308,18 @@ async function handleAction(act, el){
         if(nextIdx < state.sheet.queue.length){ await startQueueItem(nextIdx); }
         else { finishBulk(); }
       } break;
+    case "pick-paytype":
+      {
+        const target = el.getAttribute("data-target");
+        const val = el.getAttribute("data-val");
+        const hidden = document.getElementById(target);
+        if(hidden) hidden.value = val;
+        const group = el.parentElement;
+        if(group){
+          group.querySelectorAll(".toggle2-btn").forEach(b=>b.classList.remove("active"));
+        }
+        el.classList.add("active");
+      } break;
     case "save-invoice": await saveInvoiceFromForm(); break;
     case "save-all-bulk": await saveAllBulk(); break;
     case "save-payment": await savePaymentFromForm(el.getAttribute("data-key")); break;
@@ -1301,7 +1343,7 @@ async function onFilesChosen(files){
   if(files.length > 1){
     state.sheet.mode = "bulk";
     state.sheet.results = files.map(f=>({file:f, dataUrl:null, extracted:null, error:null,
-      include:true, paymentType:"μετρητοίς"}));
+      include:true, paymentType:""}));
     state.sheet.step = "processing";
     render();
     await processBulkAll();
@@ -1344,6 +1386,19 @@ async function processBulkAll(){
 async function saveAllBulk(){
   const s = state.sheet;
   if(!s) return;
+
+  for(let i=0;i<s.results.length;i++){
+    const row = s.results[i];
+    if(!row.extracted) continue;
+    const includeEl = document.getElementById("r-include-"+i);
+    if(includeEl && !includeEl.checked) continue;
+    const paytypeCheckEl = document.getElementById("r-paytype-"+i);
+    if(!paytypeCheckEl || !paytypeCheckEl.value){
+      toast("Διάλεξε τρόπο πληρωμής (Μετρητοίς/Επί πιστώσει) στο τιμολόγιο " + (i+1) + " πριν αποθηκεύσεις.");
+      return;
+    }
+  }
+
   let saved = 0;
   for(let i=0;i<s.results.length;i++){
     const row = s.results[i];
@@ -1446,6 +1501,7 @@ async function saveInvoiceFromForm(){
     createdAt: Date.now()
   };
   if(!inv.supplierName){ toast("Συμπλήρωσε το όνομα προμηθευτή."); return; }
+  if(!inv.paymentType){ toast("Διάλεξε τρόπο πληρωμής: Μετρητοίς ή Επί πιστώσει."); return; }
 
   const sheetBefore = state.sheet;
   if(sheetBefore && !sheetBefore.dupConfirmed){
@@ -1561,6 +1617,15 @@ if(typeof BackupModule !== "undefined"){
         await writeConfigFile(state.config);
       }
     }
+  });
+}
+
+if(typeof AppsStripModule !== "undefined"){
+  AppsStripModule.init({
+    appId: "timologia",
+    appTitle: "Τιμολόγια Προμηθευτών",
+    isPro: false, // δεν υπάρχει ακόμη διάκριση Pro/δωρεάν σε αυτή την εφαρμογή
+    onDataReady: ()=>{ if(state.unlocked && (state.screen==="home")) render(); }
   });
 }
 
