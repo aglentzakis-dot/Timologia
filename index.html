@@ -130,7 +130,7 @@
    κλειδί OpenRouter (χωρίς κάρτα), όπως στο Identify-AI.
    ========================================================================= */
 
-const APP_VERSION = "1.9.0";
+const APP_VERSION = "1.10.0";
 const DEFAULT_PIN = "1111";
 const DEFAULT_MODEL = ""; // κενό = αυτόματη εύρεση δωρεάν μοντέλου με εικόνα
 const MODEL_LIST_CACHE_KEY = "tim_free_vision_models";
@@ -556,6 +556,41 @@ async function callOpenRouterVision(dataUrl, apiKey, model){
   }
 }
 
+const GEMINI_MODELS = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-2.5-flash-lite"];
+
+async function callGeminiVision(dataUrl, apiKey, model){
+  const m = /^data:([^;]+);base64,(.*)$/.exec(dataUrl || "");
+  if(!m) throw new Error("Μη έγκυρη εικόνα.");
+  const body = {
+    contents: [{ parts: [
+      { text: EXTRACTION_PROMPT },
+      { inline_data: { mime_type: m[1], data: m[2] } }
+    ]}],
+    generationConfig: { temperature: 0.1, responseMimeType: "application/json" }
+  };
+  const controller = new AbortController();
+  const timer = setTimeout(()=>controller.abort(), MODEL_TIMEOUT_MS);
+  try{
+    const resp = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(model) + ":generateContent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+      body: JSON.stringify(body),
+      signal: controller.signal
+    });
+    if(!resp.ok){
+      const t = await resp.text().catch(()=>"");
+      throw new Error("Gemini HTTP " + resp.status + " " + t.slice(0,200));
+    }
+    const data = await resp.json();
+    const parts = data?.candidates?.[0]?.content?.parts || [];
+    const text = parts.map(x=>x.text||"").join("");
+    if(!text) throw new Error("Το Gemini δεν επέστρεψε κείμενο.");
+    return text;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /* Βρίσκει, ζωντανά από την OpenRouter, ποια δωρεάν μοντέλα δέχονται εικόνα
    αυτή τη στιγμή (η λίστα τους αλλάζει συχνά) — και τα κρατά σε cache 12 ώρες. */
 async function getFreeVisionModels(){
@@ -600,20 +635,28 @@ function parseJsonLoose(text){
 }
 
 async function extractInvoiceData(file, onProgress){
-  const apiKey = state.config.apiKey;
-  if(!apiKey) throw new Error("NO_API_KEY");
+  const orKey = state.config.apiKey;
+  const gemKey = state.config.geminiKey;
+  if(!orKey && !gemKey) throw new Error("NO_API_KEY");
   const dataUrl = await resizeImageDataUrl(file);
-  const modelsToTry = await candidateModels();
-  if(!modelsToTry.length) throw new Error("Δεν βρέθηκε αυτή τη στιγμή κανένα δωρεάν μοντέλο με υποστήριξη εικόνας στην OpenRouter. Δοκίμασε ξανά σε λίγο.");
+  // Σειρά προσπαθειών: πρώτα Gemini (πιο γρήγορο/σίγουρο), μετά τα δωρεάν μοντέλα OpenRouter.
+  const attempts = [];
+  if(gemKey) for(const m of GEMINI_MODELS) attempts.push({engine:"gemini", model:m});
+  if(orKey){
+    const orModels = await candidateModels();
+    for(const m of orModels) attempts.push({engine:"openrouter", model:m});
+  }
+  if(!attempts.length) throw new Error("Δεν βρέθηκε αυτή τη στιγμή κανένα διαθέσιμο μοντέλο με υποστήριξη εικόνας. Δοκίμασε ξανά σε λίγο.");
   let lastErr = null;
-  for(let i=0;i<modelsToTry.length;i++){
-    const model = modelsToTry[i];
-    if(onProgress) onProgress(i+1, modelsToTry.length, model);
+  for(let i=0;i<attempts.length;i++){
+    const {engine, model} = attempts[i];
+    if(onProgress) onProgress(i+1, attempts.length, (engine==="gemini" ? "Gemini · " : "") + model);
     try{
-      const text = await callOpenRouterVision(dataUrl, apiKey, model);
+      const text = engine==="gemini"
+        ? await callGeminiVision(dataUrl, gemKey, model)
+        : await callOpenRouterVision(dataUrl, orKey, model);
       const parsed = parseJsonLoose(text);
-      state.config.lastWorkingModel = model;
-      persistLocal();
+      if(engine==="openrouter"){ state.config.lastWorkingModel = model; persistLocal(); }
       return {parsed, dataUrl, modelUsed: model};
     }catch(e){
       lastErr = (e && e.name === "AbortError") ? new Error("Το μοντέλο «" + model + "» άργησε πολύ και ακυρώθηκε.") : e;
@@ -819,7 +862,15 @@ function renderSettingsScreen(){
     <button class="btn secondary" data-act="connect-folder">${folderReady?"Επανασύνδεση φακέλου":"Σύνδεση κοινού φακέλου"}</button>
   </div>
   <div class="card">
-    <h2>Τεχνητή νοημοσύνη (OpenRouter)</h2>
+    <h2>Τεχνητή νοημοσύνη — Gemini (πρώτη επιλογή)</h2>
+    <p class="muted">Πιο γρήγορο και πιο σίγουρο στην ανάγνωση τιμολογίων. Δωρεάν κλειδί από το <a class="linklike" href="https://aistudio.google.com/apikey" target="_blank">aistudio.google.com/apikey</a> — μόνο με λογαριασμό Google, χωρίς κάρτα. Αν το αφήσεις κενό, χρησιμοποιείται μόνο το OpenRouter παρακάτω.</p>
+    <label>Κλειδί Gemini</label>
+    <input id="f-geminikey" type="text" value="${escapeHtml(cfg.geminiKey||"")}" placeholder="AIza...">
+    <div style="height:10px"></div>
+    <button class="btn secondary" data-act="save-ai">Αποθήκευση</button>
+  </div>
+  <div class="card">
+    <h2>Τεχνητή νοημοσύνη (OpenRouter — εφεδρική)</h2>
     <p class="muted">Δωρεάν κλειδί, χωρίς κάρτα — από <a class="linklike" href="https://openrouter.ai/keys" target="_blank">openrouter.ai/keys</a>.</p>
     <label>Κλειδί API</label>
     <input id="f-apikey" type="text" value="${escapeHtml(cfg.apiKey||"")}" placeholder="sk-or-v1-...">
@@ -1240,6 +1291,7 @@ async function handleAction(act, el){
       render(); break;
     case "save-ai":
       state.config.apiKey = document.getElementById("f-apikey").value.trim();
+      state.config.geminiKey = document.getElementById("f-geminikey").value.trim();
       state.config.model = document.getElementById("f-model").value.trim();
       persistLocal(); await writeConfigFile(state.config); toast("Αποθηκεύτηκε."); break;
     case "add-vat":
@@ -1374,7 +1426,7 @@ async function processBulkAll(){
     }catch(e){
       console.error(e);
       row.error = (e && e.message === "NO_API_KEY")
-        ? "Δεν έχει καταχωρηθεί κλειδί OpenRouter στις Ρυθμίσεις."
+        ? "Δεν έχει καταχωρηθεί κλειδί τεχνητής νοημοσύνης (Gemini ή OpenRouter) στις Ρυθμίσεις."
         : ("Απέτυχε: " + (e && e.message ? e.message : "άγνωστο σφάλμα"));
       row.include = false;
     }
@@ -1468,7 +1520,7 @@ async function startQueueItem(idx){
     console.error(e);
     s.step = "error";
     s.errorMsg = (e && e.message === "NO_API_KEY")
-      ? "Δεν έχει καταχωρηθεί κλειδί OpenRouter στις Ρυθμίσεις."
+      ? "Δεν έχει καταχωρηθεί κλειδί τεχνητής νοημοσύνης (Gemini ή OpenRouter) στις Ρυθμίσεις."
       : ("Η ανάλυση απέτυχε: " + (e && e.message ? e.message : "άγνωστο σφάλμα"));
   }
   render();
