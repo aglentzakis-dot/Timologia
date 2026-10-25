@@ -131,8 +131,29 @@
    κλειδί OpenRouter (χωρίς κάρτα), όπως στο Identify-AI.
    ========================================================================= */
 
-const APP_VERSION = "1.10.1";
-const DEFAULT_PIN = "1111";
+const APP_VERSION = "1.10.2";
+const DEFAULT_PIN = "";   /* 25/10/2026: καμία προεπιλογή — ο κωδικός ορίζεται στο πρώτο άνοιγμα */
+const PIN_LEN = 6;
+/* Ο κωδικός διαχειριστή αποθηκεύεται ΜΟΝΟ ως αλατισμένο αποτύπωμα (PBKDF2), ποτέ σε απλό κείμενο.
+   Παλιοί 4ψήφιοι κωδικοί σε απλό κείμενο δεν ισχύουν πια. */
+const PIN_ITER = 310000;
+const pb64e = (buf) => btoa(String.fromCharCode.apply(null, new Uint8Array(buf)));
+const pb64d = (x) => Uint8Array.from(atob(x), c => c.charCodeAt(0));
+async function adminPinDerive(code, saltB64){
+  const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(String(code)), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits({name:"PBKDF2", salt:pb64d(saltB64), iterations:PIN_ITER, hash:"SHA-256"}, base, 256);
+  return pb64e(bits);
+}
+async function adminPinMake(code){
+  const salt = pb64e(crypto.getRandomValues(new Uint8Array(16)));
+  return {adminPinS: salt, adminPinH: await adminPinDerive(code, salt), adminPin: ""};
+}
+const adminPinSet = (cfg) => !!(cfg && cfg.adminPinS && cfg.adminPinH);
+async function adminPinOk(cfg, code){
+  if(!adminPinSet(cfg)) return false;
+  return (await adminPinDerive(code, cfg.adminPinS)) === cfg.adminPinH;
+}
+const weakPin = (v) => /^(\d)\1+$/.test(v) || "0123456789".includes(v) || "9876543210".includes(v);
 const DEFAULT_MODEL = ""; // κενό = αυτόματη εύρεση δωρεάν μοντέλου με εικόνα
 const MODEL_LIST_CACHE_KEY = "tim_free_vision_models";
 const MODEL_LIST_MAX_AGE = 12 * 60 * 60 * 1000; // 12 ώρες
@@ -378,7 +399,8 @@ async function syncFromFolder(){
     const cfg = await readConfigFile();
     if(cfg){
       // Οι ρυθμίσεις του κοινού αρχείου υπερισχύουν (τις διαχειρίζεται ο διαχειριστής)
-      state.config.adminPin = cfg.adminPin || state.config.adminPin;
+      if(cfg.adminPinS && cfg.adminPinH){ state.config.adminPinS = cfg.adminPinS; state.config.adminPinH = cfg.adminPinH; }
+      state.config.adminPin = "";
       state.config.vatRates = cfg.vatRates || state.config.vatRates;
       state.config.staff = cfg.staff || state.config.staff;
       persistLocal();
@@ -901,8 +923,8 @@ function renderSettingsScreen(){
   </div>
   <div class="card">
     <h2>Κωδικός διαχειριστή</h2>
-    <label>Νέος κωδικός (4 ψηφία)</label>
-    <input id="f-pin" type="text" maxlength="4" inputmode="numeric" placeholder="${cfg.adminPin}">
+    <label>Νέος κωδικός (6 ψηφία)</label>
+    <input id="f-pin" type="password" maxlength="6" inputmode="numeric" autocomplete="new-password" placeholder="••••••">
     <div style="height:10px"></div>
     <button class="btn secondary" data-act="save-pin">Αλλαγή κωδικού</button>
   </div>
@@ -1145,9 +1167,12 @@ function sheetPaymentHtml(s){
 
 function sheetPinHtml(s){
   const len = (s.pin||"").length;
+  const neos = !adminPinSet(state.config);
+  const titlos = !neos ? "Κωδικός διαχειριστή" : (s.first ? "Ξαναπληκτρολόγησε τον νέο κωδικό" : "Όρισε κωδικό διαχειριστή (" + PIN_LEN + " ψηφία)");
   return `
-  <h2>Κωδικός διαχειριστή</h2>
-  <div class="pin-dots">${[0,1,2,3].map(i=>`<div class="pin-dot ${i<len?'filled':''}"></div>`).join("")}</div>
+  <h2>${titlos}</h2>
+  ${s.msg?`<div class="badbox">${s.msg}</div>`:""}
+  <div class="pin-dots">${Array.from({length:PIN_LEN},(_,i)=>i).map(i=>`<div class="pin-dot ${i<len?'filled':''}"></div>`).join("")}</div>
   ${s.error?`<div class="badbox">Λάθος κωδικός.</div>`:""}
   <div class="keypad">
     ${[1,2,3,4,5,6,7,8,9].map(n=>`<button data-act="pin-digit" data-d="${n}">${n}</button>`).join("")}
@@ -1258,8 +1283,21 @@ async function handleAction(act, el){
         const d = el.getAttribute("data-d");
         state.sheet.pin = (state.sheet.pin||"") + d;
         state.sheet.error = false;
-        if(state.sheet.pin.length === 4){
-          if(state.sheet.pin === state.config.adminPin){
+        if(state.sheet.pin.length === PIN_LEN){
+          const v = state.sheet.pin;
+          if(!adminPinSet(state.config)){
+            /* Πρώτο άνοιγμα: ορισμός κωδικού με επιβεβαίωση */
+            if(!state.sheet.first){
+              if(weakPin(v)){ state.sheet.pin=""; state.sheet.msg="Πολύ εύκολος κωδικός. Διάλεξε άλλον."; render(); return; }
+              state.sheet.first = v; state.sheet.pin = ""; state.sheet.msg = ""; render(); return;
+            }
+            if(v !== state.sheet.first){ state.sheet.first = ""; state.sheet.pin = ""; state.sheet.msg = "Οι δύο κωδικοί δεν ταιριάζουν. Ξεκίνα πάλι."; render(); return; }
+            Object.assign(state.config, await adminPinMake(v));
+            persistLocal(); await writeConfigFile(state.config);
+            state.unlocked = true; state.currentStaff = "Διαχειριστής";
+            persistLocal(); closeSheet(); toast("Ο κωδικός ορίστηκε."); return;
+          }
+          if(await adminPinOk(state.config, v)){
             state.unlocked = true; state.currentStaff = "Διαχειριστής";
             persistLocal();
             closeSheet();
@@ -1324,9 +1362,9 @@ async function handleAction(act, el){
     case "save-pin":
       {
         const v = document.getElementById("f-pin").value.trim();
-        if(/^\d{4}$/.test(v)){
-          state.config.adminPin = v; persistLocal(); await writeConfigFile(state.config); toast("Ο κωδικός άλλαξε.");
-        } else toast("Ο κωδικός πρέπει να έχει 4 ψηφία.");
+        if(/^\d{6}$/.test(v) && !weakPin(v)){
+          Object.assign(state.config, await adminPinMake(v)); persistLocal(); await writeConfigFile(state.config); toast("Ο κωδικός άλλαξε.");
+        } else toast("Ο κωδικός πρέπει να έχει 6 ψηφία και να μην είναι εύκολος (π.χ. 111111, 123456).");
         render();
       } break;
     case "pick-accent":
