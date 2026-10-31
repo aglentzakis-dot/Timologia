@@ -83,6 +83,8 @@
   .vhead{font-size:11px;color:var(--muted);margin-bottom:4px;}
   .vrow{margin-bottom:6px;}
   .vrow select,.vrow input{padding:9px 6px;font-size:14px;}
+  .vrow.vwarn select,.vrow.vwarn input{border-color:#e0a030;background:#fff8ea;}
+  .vatblock.vbad{border-color:var(--bad);border-width:2px;}
   .vr-del{border:none;background:none;color:var(--bad);font-size:16px;cursor:pointer;padding:0;}
   .keystatus{font-size:13px;font-weight:700;margin:6px 0 0;min-height:18px;}
   .keystatus.ok{color:#1e7a3c;}
@@ -141,7 +143,7 @@
    κλειδί OpenRouter (χωρίς κάρτα), όπως στο Identify-AI.
    ========================================================================= */
 
-const APP_VERSION = "1.12.0";
+const APP_VERSION = "1.12.1";
 const DEFAULT_PIN = "";   /* 25/10/2026: καμία προεπιλογή — ο κωδικός ορίζεται στο πρώτο άνοιγμα */
 const PIN_LEN = 6;
 /* Ο κωδικός διαχειριστή αποθηκεύεται ΜΟΝΟ ως αλατισμένο αποτύπωμα (PBKDF2), ποτέ σε απλό κείμενο.
@@ -1345,6 +1347,13 @@ function readBreakdown(prefix){
   const main = rows.slice().sort((a,b)=>b.net-a.net)[0];
   return {rows, net, vat, rate: main ? main.rate : 0};
 }
+function sumCheck(prefix, grossId){
+  const b = readBreakdown(prefix);
+  const gEl = document.getElementById(grossId);
+  const gross = gEl ? Number(gEl.value)||0 : 0;
+  const sum = Math.round((b.net+b.vat)*100)/100;
+  return {mismatch: !!gross && Math.abs(sum-gross) > 0.02, sig: b.net+"|"+b.vat+"|"+gross, sum, gross};
+}
 function updateVatSum(box){
   if(!box) return;
   const prefix = box.id.replace(/-vat$/,"");
@@ -1356,6 +1365,18 @@ function updateVatSum(box){
   let txt = "Σύνολο καθαρής: " + fmtMoney(b.net) + " · ΦΠΑ: " + fmtMoney(b.vat) + " · Άθροισμα: " + fmtMoney(sum);
   el.style.color = "";
   if(gross && Math.abs(sum-gross) > 0.02){ txt += " — δεν ταιριάζει με το σύνολο " + fmtMoney(gross) + ", έλεγξε τα ποσά"; el.style.color = "var(--bad)"; }
+  // έλεγχος κάθε γραμμής: το ΦΠΑ πρέπει να είναι περίπου καθαρή × συντελεστής
+  const warns = [];
+  box.querySelectorAll(".vrow").forEach(r=>{
+    const rate = Number(r.querySelector(".vr-rate").value)||0;
+    const net = Number(r.querySelector(".vr-net").value)||0;
+    const vat = Number(r.querySelector(".vr-vat").value)||0;
+    const exp = Math.round(net*rate)/100;
+    const bad = (net||vat) && Math.abs(vat-exp) > Math.max(0.06, exp*0.01);
+    r.classList.toggle("vwarn", !!bad);
+    if(bad) warns.push(rate + "%: αναμένεται ΦΠΑ περίπου " + fmtMoney(exp) + " (έχει " + fmtMoney(vat) + ")");
+  });
+  if(warns.length){ txt += " · ⚠ " + warns.join(" · "); if(!el.style.color) el.style.color = "#b26a00"; }
   el.textContent = txt;
 }
 document.addEventListener("click", (e)=>{
@@ -1711,6 +1732,25 @@ async function saveAllBulk(){
     }
   }
 
+  {
+    const bad = []; let sig = "";
+    for(let i=0;i<s.results.length;i++){
+      const row = s.results[i];
+      if(!row.extracted) continue;
+      const includeEl = document.getElementById("r-include-"+i);
+      if(includeEl && !includeEl.checked) continue;
+      const sc = sumCheck("r"+i, "r-gross-"+i);
+      const box = document.getElementById("r"+i+"-vat");
+      if(box) box.classList.toggle("vbad", sc.mismatch);
+      if(sc.mismatch){ bad.push(i+1); sig += i + ":" + sc.sig + ";"; }
+    }
+    if(bad.length && s.bulkSumSig !== sig){
+      s.bulkSumSig = sig;
+      toast("Τα ποσά δεν ταιριάζουν στα τιμολόγια: " + bad.join(", ") + " (κόκκινο πλαίσιο). Διόρθωσέ τα ή πάτα ξανά «Αποθήκευση όλων» για να αποθηκευτούν όπως είναι.");
+      return;
+    }
+  }
+
   let saved = 0;
   for(let i=0;i<s.results.length;i++){
     const row = s.results[i];
@@ -1814,6 +1854,18 @@ async function saveInvoiceFromForm(){
   };
   if(!inv.supplierName){ toast("Συμπλήρωσε το όνομα προμηθευτή."); return; }
   if(!inv.paymentType){ toast("Διάλεξε τρόπο πληρωμής: Μετρητοίς ή Επί πιστώσει."); return; }
+  {
+    const sc = sumCheck("f","f-gross");
+    const box = document.getElementById("f-vat");
+    if(box) box.classList.toggle("vbad", sc.mismatch);
+    if(sc.mismatch && !(state.sheet && state.sheet.sumSig === sc.sig)){
+      if(state.sheet) state.sheet.sumSig = sc.sig;
+      toast("Τα ποσά δεν ταιριάζουν: καθαρή + ΦΠΑ = " + fmtMoney(sc.sum) + ", σύνολο τιμολογίου " + fmtMoney(sc.gross) + ". Διόρθωσέ τα ή πάτα ξανά για αποθήκευση όπως είναι.");
+      const btn = document.querySelector('[data-act="save-invoice"]');
+      if(btn) btn.textContent = "Αποθήκευση όπως είναι (τα ποσά δεν ταιριάζουν)";
+      return;
+    }
+  }
 
   const sheetBefore = state.sheet;
   if(sheetBefore && !sheetBefore.dupConfirmed){
