@@ -135,7 +135,7 @@
    κλειδί OpenRouter (χωρίς κάρτα), όπως στο Identify-AI.
    ========================================================================= */
 
-const APP_VERSION = "1.11.1";
+const APP_VERSION = "1.11.2";
 const DEFAULT_PIN = "";   /* 25/10/2026: καμία προεπιλογή — ο κωδικός ορίζεται στο πρώτο άνοιγμα */
 const PIN_LEN = 6;
 /* Ο κωδικός διαχειριστή αποθηκεύεται ΜΟΝΟ ως αλατισμένο αποτύπωμα (PBKDF2), ποτέ σε απλό κείμενο.
@@ -713,6 +713,8 @@ async function extractInvoiceData(file, onProgress){
   }
   if(!attempts.length) throw new Error("Δεν βρέθηκε αυτή τη στιγμή κανένα διαθέσιμο μοντέλο με υποστήριξη εικόνας. Δοκίμασε ξανά σε λίγο.");
   let lastErr = null;
+  let prevErr = "";
+  let geminiKeyRejected = false;
   const errs = {gemini:null, openrouter:null, orCount:0};
   const shortErr = (e)=>{
     if(e && e.name==="AbortError") return "άργησε πολύ";
@@ -724,7 +726,8 @@ async function extractInvoiceData(file, onProgress){
   };
   for(let i=0;i<attempts.length;i++){
     const {engine, model} = attempts[i];
-    if(onProgress) onProgress(i+1, attempts.length, (engine==="gemini" ? "Gemini · " : "") + model);
+    if(engine==="gemini" && geminiKeyRejected) continue; // το κλειδί απορρίφθηκε — άδικος χρόνος με τις άλλες εκδόσεις
+    if(onProgress) onProgress(i+1, attempts.length, (engine==="gemini" ? "Gemini · " : "") + model, prevErr);
     try{
       const text = engine==="gemini"
         ? await callGeminiVision(dataUrl, gemKey, model)
@@ -734,6 +737,8 @@ async function extractInvoiceData(file, onProgress){
       return {parsed, dataUrl, modelUsed: model};
     }catch(e){
       lastErr = e;
+      prevErr = (engine==="gemini" ? "Gemini" : "OpenRouter") + ": " + shortErr(e);
+      if(engine==="gemini" && /HTTP 40[013]|API key|PERMISSION_DENIED/i.test(String(e&&e.message))) geminiKeyRejected = true;
       if(engine==="gemini"){ if(!errs.gemini) errs.gemini = shortErr(e); }
       else { errs.openrouter = shortErr(e); errs.orCount++; }
       // Όριο χρήσης στο Gemini: μία σύντομη αναμονή πριν δοκιμάσουμε το επόμενο
@@ -1059,11 +1064,11 @@ function sheetAddInvoiceHtml(s){
     <button class="btn secondary" data-act="close-sheet">Άκυρο</button>`;
   }
   if(s.step === "loading"){
-    const prog = s.progress ? `<div class="muted">Δοκιμή μοντέλου ${s.progress.i}/${s.progress.n}: ${escapeHtml(s.progress.model||"")}</div>` : "";
+    const prog = s.progress ? `<div class="muted">Δοκιμή μηχανής ${s.progress.i} από ${s.progress.n}: ${escapeHtml(s.progress.model||"")}</div>${s.progress.err?`<div class="muted" style="color:var(--bad);font-size:12px;">Προηγούμενη απέτυχε — ${escapeHtml(s.progress.err)}</div>`:""}` : "";
     return `<div class="loader"><div class="spin"></div><div>Ανάλυση τιμολογίου με τεχνητή νοημοσύνη…</div>${prog}</div>`;
   }
   if(s.step === "processing"){
-    const prog = s.progress ? `<div class="muted">Δοκιμή μοντέλου: ${escapeHtml(s.progress.model||"")}</div>` : "";
+    const prog = s.progress ? `<div class="muted">Δοκιμή μηχανής ${s.progress.i} από ${s.progress.n}: ${escapeHtml(s.progress.model||"")}</div>${s.progress.err?`<div class="muted" style="color:var(--bad);font-size:12px;">Προηγούμενη απέτυχε — ${escapeHtml(s.progress.err)}</div>`:""}` : "";
     return `
     <h2>Ανάλυση φωτογραφιών</h2>
     <div class="loader">
@@ -1543,8 +1548,8 @@ async function processBulkAll(){
     const row = s.results[i];
     if(i>0 && state.config.geminiKey) await new Promise(r=>setTimeout(r,1500)); // να μη φτάσουμε το όριο αιτήσεων
     try{
-      const {parsed, dataUrl} = await extractInvoiceData(row.file, (a,b,model)=>{
-        if(state.sheet && state.sheet.step==="processing"){ state.sheet.progress = {i:a,n:b,model}; render(); }
+      const {parsed, dataUrl} = await extractInvoiceData(row.file, (a,b,model,err)=>{
+        if(state.sheet && state.sheet.step==="processing"){ state.sheet.progress = {i:a,n:b,model,err}; render(); }
       });
       row.extracted = parsed;
       row.dataUrl = dataUrl;
@@ -1636,8 +1641,8 @@ async function startQueueItem(idx){
   render();
   try{
     const dataUrl = await fileToDataUrl(file);
-    const {parsed} = await extractInvoiceData(file, (i,n,model)=>{
-      if(state.sheet && state.sheet.step==="loading"){ state.sheet.progress = {i,n,model}; render(); }
+    const {parsed} = await extractInvoiceData(file, (i,n,model,err)=>{
+      if(state.sheet && state.sheet.step==="loading"){ state.sheet.progress = {i,n,model,err}; render(); }
     });
     s.extracted = parsed;
     s.dataUrl = dataUrl;
