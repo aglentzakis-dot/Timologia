@@ -78,6 +78,10 @@
     border-radius:999px;padding:6px 12px;font-size:13px;font-weight:600;margin:4px 6px 0 0;cursor:pointer;
     border:1px solid var(--line);}
   .staff-chip.sel{background:var(--accent);color:#fff;border-color:var(--accent);}
+  .keystatus{font-size:13px;font-weight:700;margin:6px 0 0;min-height:18px;}
+  .keystatus.ok{color:#1e7a3c;}
+  .keystatus.bad{color:var(--bad);}
+  .keystatus.wait{color:var(--muted);font-weight:500;}
   .toggle2{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
   .toggle2-btn{padding:11px 10px;border-radius:10px;border:2px solid var(--line);
     background:#fff;color:var(--ink);font-size:14px;font-weight:700;cursor:pointer;text-align:center;}
@@ -131,7 +135,7 @@
    κλειδί OpenRouter (χωρίς κάρτα), όπως στο Identify-AI.
    ========================================================================= */
 
-const APP_VERSION = "1.10.2";
+const APP_VERSION = "1.11.0";
 const DEFAULT_PIN = "";   /* 25/10/2026: καμία προεπιλογή — ο κωδικός ορίζεται στο πρώτο άνοιγμα */
 const PIN_LEN = 6;
 /* Ο κωδικός διαχειριστή αποθηκεύεται ΜΟΝΟ ως αλατισμένο αποτύπωμα (PBKDF2), ποτέ σε απλό κείμενο.
@@ -648,6 +652,44 @@ async function candidateModels(){
   return list;
 }
 
+/* Έλεγχος κλειδιών: πράσινη ένδειξη αν δουλεύουν, κόκκινη αν όχι. */
+const keyStatus = {gemini:null, or:null};
+function paintKeyStatus(){
+  const put = (id, st, has)=>{
+    const el = document.getElementById(id);
+    if(!el) return;
+    if(!has){ el.className = "keystatus"; el.textContent = ""; return; }
+    if(!st){ el.className = "keystatus wait"; el.textContent = "Έλεγχος…"; return; }
+    el.className = "keystatus " + (st.ok ? "ok" : "bad");
+    el.textContent = (st.ok ? "✔ " : "✖ ") + st.msg;
+  };
+  put("ks-gemini", keyStatus.gemini, !!state.config.geminiKey);
+  put("ks-or", keyStatus.or, !!state.config.apiKey);
+}
+async function checkOneKey(url, headers){
+  const c = new AbortController();
+  const t = setTimeout(()=>c.abort(), 12000);
+  try{
+    const r = await fetch(url, {headers, signal:c.signal});
+    if(r.ok) return {ok:true, msg:"Το κλειδί δουλεύει"};
+    if(r.status===400 || r.status===401 || r.status===403) return {ok:false, msg:"Το κλειδί δεν είναι σωστό (" + r.status + ")"};
+    if(r.status===429) return {ok:true, msg:"Το κλειδί δουλεύει (προσωρινό όριο χρήσης)"};
+    return {ok:false, msg:"Άγνωστο πρόβλημα (HTTP " + r.status + ")"};
+  }catch(e){
+    return {ok:false, msg:"Δεν έγινε σύνδεση — έλεγξε το διαδίκτυο"};
+  }finally{ clearTimeout(t); }
+}
+async function checkKeys(force){
+  const gk = state.config.geminiKey, ok_ = state.config.apiKey;
+  if(force){ keyStatus.gemini = null; keyStatus.or = null; }
+  paintKeyStatus();
+  const jobs = [];
+  if(gk && !keyStatus.gemini) jobs.push(checkOneKey("https://generativelanguage.googleapis.com/v1beta/models?pageSize=1", {"x-goog-api-key": gk}).then(r=>{keyStatus.gemini=r;}));
+  if(ok_ && !keyStatus.or) jobs.push(checkOneKey("https://openrouter.ai/api/v1/auth/key", {"Authorization":"Bearer "+ok_}).then(r=>{keyStatus.or=r;}));
+  await Promise.all(jobs);
+  paintKeyStatus();
+}
+
 function parseJsonLoose(text){
   let t = text.trim();
   t = t.replace(/^```json/i,"").replace(/^```/,"").replace(/```$/,"").trim();
@@ -712,6 +754,7 @@ function render(){
   root.innerHTML = html;
   if(state.sheet) renderSheet();
   bindEvents();
+  if(typeof paintKeyStatus==="function") paintKeyStatus();
 }
 
 function renderTopbar(){
@@ -822,13 +865,14 @@ function renderSupplierScreen(){
   </div>
   <div class="card">
     <h3>Τιμολόγια</h3>
-    <div class="muted" style="font-size:12px;margin-bottom:4px;">Κράτα πατημένο ένα τιμολόγιο για διαγραφή.</div>`;
+    <div class="muted" style="font-size:12px;margin-bottom:4px;">Πάτα ένα τιμολόγιο για την ανάλυσή του· κράτα το πατημένο για διαγραφή.</div>`;
   for(const inv of [...s.invoices].reverse()){
     html += `
-    <div class="list-item" data-longpress="del-invoice" data-id="${escapeHtml(inv.id)}">
+    <div class="list-item" data-longpress="del-invoice" data-act="open-invoice" data-id="${escapeHtml(inv.id)}" style="cursor:pointer;">
       <div>
         <div style="font-weight:600;">${fmtDate(inv.date)}</div>
         <div class="muted">${inv.paymentType==='μετρητοίς'?'Μετρητοίς':'Επί πιστώσει'} ${inv.who?('· '+escapeHtml(inv.who)):''}</div>
+        <div class="muted" style="font-size:12px;">Καθαρή ${fmtMoney(inv.netAmount)} · ΦΠΑ ${Number(inv.vatRate)||0}% ${fmtMoney(inv.vatAmount)}</div>
       </div>
       <div style="text-align:right;">${fmtMoney(inv.grossAmount)}</div>
     </div>`;
@@ -889,6 +933,7 @@ function renderSettingsScreen(){
     <p class="muted">Πιο γρήγορο και πιο σίγουρο στην ανάγνωση τιμολογίων. Δωρεάν κλειδί από το <a class="linklike" href="https://aistudio.google.com/apikey" target="_blank">aistudio.google.com/apikey</a> — μόνο με λογαριασμό Google, χωρίς κάρτα. Αν το αφήσεις κενό, χρησιμοποιείται μόνο το OpenRouter παρακάτω.</p>
     <label>Κλειδί Gemini</label>
     <input id="f-geminikey" type="text" value="${escapeHtml(cfg.geminiKey||"")}" placeholder="AIza...">
+    <div id="ks-gemini" class="keystatus"></div>
     <div style="height:10px"></div>
     <button class="btn secondary" data-act="save-ai">Αποθήκευση</button>
   </div>
@@ -897,6 +942,7 @@ function renderSettingsScreen(){
     <p class="muted">Δωρεάν κλειδί, χωρίς κάρτα — από <a class="linklike" href="https://openrouter.ai/keys" target="_blank">openrouter.ai/keys</a>.</p>
     <label>Κλειδί API</label>
     <input id="f-apikey" type="text" value="${escapeHtml(cfg.apiKey||"")}" placeholder="sk-or-v1-...">
+    <div id="ks-or" class="keystatus"></div>
     <p class="muted" style="margin-top:10px;">Η εφαρμογή βρίσκει μόνη της, κάθε φορά, ποιο δωρεάν μοντέλο με υποστήριξη εικόνας είναι αυτή τη στιγμή διαθέσιμο στην OpenRouter (η λίστα τους αλλάζει συχνά) και τα δοκιμάζει ένα-ένα.</p>
     <label>Συγκεκριμένο μοντέλο (προχωρημένο, προαιρετικό — άσε το κενό για αυτόματη εύρεση)</label>
     <input id="f-model" type="text" value="${escapeHtml(cfg.model||"")}" placeholder="π.χ. qwen/qwen2.5-vl-72b-instruct:free">
@@ -987,7 +1033,7 @@ function sheetAddInvoiceHtml(s){
     </div>
     <div style="height:10px"></div>
     <div style="position:relative;">
-      <button class="btn secondary">🖼️ Επιλογή από συλλογή</button>
+      <button class="btn secondary">🖼️ Επιλογή πολλών φωτογραφιών από τη συλλογή</button>
       <input type="file" accept="image/*" multiple data-act="capture-gallery"
         style="position:absolute;inset:0;opacity:0;cursor:pointer;">
     </div>
@@ -1184,12 +1230,31 @@ function sheetPinHtml(s){
 
 /* -------------------------------- Γενικός renderer sheet -------------------------------- */
 
+function sheetInvoiceDetailHtml(s){
+  const inv = allInvoices().find(x=>x.id===s.id);
+  if(!inv) return `<h2>Τιμολόγιο</h2><div class="badbox">Δεν βρέθηκε το τιμολόγιο.</div><button class="btn secondary" data-act="close-sheet">Κλείσιμο</button>`;
+  const row = (a,b,bold)=>`<div class="row"><div${bold?' style="font-weight:700;"':''}>${a}</div><div${bold?' style="font-weight:700;"':''}>${b}</div></div>`;
+  return `
+  <h2>${escapeHtml(inv.supplierName||"Τιμολόγιο")}</h2>
+  <div class="muted" style="margin-bottom:8px;">${fmtDate(inv.date)} · ${inv.paymentType==='μετρητοίς'?'Μετρητοίς':'Επί πιστώσει'}${inv.who?(' · '+escapeHtml(inv.who)):''}</div>
+  <div class="card" style="margin:0 0 10px;">
+    ${row("Καθαρή αξία", fmtMoney(inv.netAmount))}
+    ${row("ΦΠΑ "+(Number(inv.vatRate)||0)+"%", fmtMoney(inv.vatAmount))}
+    <div class="divider"></div>
+    ${row("Σύνολο", fmtMoney(inv.grossAmount), true)}
+  </div>
+  ${inv.afm?`<div class="muted">ΑΦΜ: ${escapeHtml(inv.afm)}</div>`:""}
+  <div style="height:10px"></div>
+  <button class="btn secondary" data-act="close-sheet">Κλείσιμο</button>`;
+}
+
 function renderSheet(){
   const s = state.sheet;
   let inner = "";
   let center = false;
   if(s.type === "add-invoice") inner = sheetAddInvoiceHtml(s);
   else if(s.type === "payment") inner = sheetPaymentHtml(s);
+  else if(s.type === "invoice-detail") inner = sheetInvoiceDetailHtml(s);
   else if(s.type === "pin"){ inner = sheetPinHtml(s); center = true; }
   const overlay = document.createElement("div");
   overlay.className = "sheet-overlay" + (center?" center-sheet":"");
@@ -1244,6 +1309,7 @@ function bindLongPress(el){
 }
 
 function handleLongPress(kind, el){
+  window.__lpFired = Date.now();
   if(kind === "del-invoice"){
     const id = el.getAttribute("data-id");
     if(confirm("Διαγραφή αυτού του τιμολογίου; Δεν αναιρείται.")){
@@ -1313,12 +1379,15 @@ async function handleAction(act, el){
       state.sheet.pin = (state.sheet.pin||"").slice(0,-1); state.sheet.error = false; render(); break;
     case "close-sheet": closeSheet(); break;
     case "go-home": state.screen="home"; state.sheet=null; render(); break;
-    case "go-settings": state.screen="settings"; state.sheet=null; render(); break;
+    case "go-settings": state.screen="settings"; state.sheet=null; render(); checkKeys(false); break;
     case "go-apps-page": state.screen="apps-page"; state.sheet=null; render(); break;
     case "open-add": openAddInvoiceSheet(); break;
     case "open-supplier":
       state.openSupplierKey = el.getAttribute("data-key");
       state.screen = "supplier"; render(); break;
+    case "open-invoice":
+      if(Date.now() - (window.__lpFired||0) < 900) break; // μόλις έγινε παρατεταμένο πάτημα (διαγραφή)
+      state.sheet = {type:"invoice-detail", id: el.getAttribute("data-id")}; render(); break;
     case "open-payment":
       state.sheet = {type:"payment", key: el.getAttribute("data-key")}; render(); break;
     case "copy":
@@ -1332,7 +1401,8 @@ async function handleAction(act, el){
       state.config.apiKey = document.getElementById("f-apikey").value.trim();
       state.config.geminiKey = document.getElementById("f-geminikey").value.trim();
       state.config.model = document.getElementById("f-model").value.trim();
-      persistLocal(); await writeConfigFile(state.config); toast("Αποθηκεύτηκε."); break;
+      persistLocal(); await writeConfigFile(state.config); toast("Αποθηκεύτηκε.");
+      checkKeys(true); break;
     case "add-vat":
       {
         const v = Number(document.getElementById("f-newvat").value);
