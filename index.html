@@ -78,6 +78,12 @@
     border-radius:999px;padding:6px 12px;font-size:13px;font-weight:600;margin:4px 6px 0 0;cursor:pointer;
     border:1px solid var(--line);}
   .staff-chip.sel{background:var(--accent);color:#fff;border-color:var(--accent);}
+  .vatblock{border:1px solid var(--line);border-radius:10px;padding:8px;margin-bottom:6px;}
+  .vhead,.vrow{display:grid;grid-template-columns:86px 1fr 1fr 32px;gap:6px;align-items:center;}
+  .vhead{font-size:11px;color:var(--muted);margin-bottom:4px;}
+  .vrow{margin-bottom:6px;}
+  .vrow select,.vrow input{padding:9px 6px;font-size:14px;}
+  .vr-del{border:none;background:none;color:var(--bad);font-size:16px;cursor:pointer;padding:0;}
   .keystatus{font-size:13px;font-weight:700;margin:6px 0 0;min-height:18px;}
   .keystatus.ok{color:#1e7a3c;}
   .keystatus.bad{color:var(--bad);}
@@ -135,7 +141,7 @@
    κλειδί OpenRouter (χωρίς κάρτα), όπως στο Identify-AI.
    ========================================================================= */
 
-const APP_VERSION = "1.11.5";
+const APP_VERSION = "1.12.0";
 const DEFAULT_PIN = "";   /* 25/10/2026: καμία προεπιλογή — ο κωδικός ορίζεται στο πρώτο άνοιγμα */
 const PIN_LEN = 6;
 /* Ο κωδικός διαχειριστή αποθηκεύεται ΜΟΝΟ ως αλατισμένο αποτύπωμα (PBKDF2), ποτέ σε απλό κείμενο.
@@ -538,6 +544,7 @@ const EXTRACTION_PROMPT = `Σου δίνω φωτογραφία ενός τιμ�
  "netAmount": αριθμός καθαρής αξίας χωρίς ΦΠΑ,
  "vatAmount": αριθμός συνολικού ΦΠΑ,
  "vatRate": αριθμός κύριου συντελεστή ΦΠΑ (π.χ. 13 ή 24, χωρίς το % σύμβολο),
+ "vatBreakdown": [ {"rate": αριθμός συντελεστή, "net": καθαρή αξία αυτού του συντελεστή, "vat": ΦΠΑ αυτού του συντελεστή} ] — ΜΙΑ γραμμή για ΚΑΘΕ συντελεστή ΦΠΑ που υπάρχει στο τιμολόγιο (π.χ. και 13% και 24% στο ίδιο τιμολόγιο). Αν υπάρχει πίνακας «Ανάλυση ΦΠΑ κατά συντελεστή» πάρε τα νούμερα από εκεί. Τα netAmount και vatAmount είναι τα ΣΥΝΟΛΑ όλων των συντελεστών.
  "grossAmount": αριθμός τελικού συνόλου πληρωμής,
  "hasQr": true/false αν υπάρχει QR κωδικός στο παραστατικό,
  "amountConfident": true/false αν είσαι σίγουρος για το συνολικό ποσό,
@@ -953,7 +960,7 @@ function renderSupplierScreen(){
       <div>
         <div style="font-weight:600;">${fmtDate(inv.date)}</div>
         <div class="muted">${inv.paymentType==='μετρητοίς'?'Μετρητοίς':'Επί πιστώσει'} ${inv.who?('· '+escapeHtml(inv.who)):''}</div>
-        <div class="muted" style="font-size:12px;">Καθαρή ${fmtMoney(inv.netAmount)} · ΦΠΑ ${Number(inv.vatRate)||0}% ${fmtMoney(inv.vatAmount)}</div>
+        ${normBreakdown(inv).map(b=>`<div class="muted" style="font-size:12px;">Καθαρή ${fmtMoney(b.net)} · ΦΠΑ ${b.rate}% ${fmtMoney(b.vat)}</div>`).join("")}
       </div>
       <div style="text-align:right;">${fmtMoney(inv.grossAmount)}</div>
     </div>`;
@@ -1169,14 +1176,8 @@ function sheetAddInvoiceHtml(s){
           <div><label>Ημερομηνία</label><input id="r-date-${i}" type="date" value="${escapeHtml(d.date||todayISO())}"></div>
           <div><label>Σύνολο (€)</label><input id="r-gross-${i}" type="number" step="0.01" value="${d.grossAmount||""}"></div>
         </div>
-        <div class="grid2">
-          <div><label>Καθαρή αξία (€)</label><input id="r-net-${i}" type="number" step="0.01" value="${d.netAmount||""}"></div>
-          <div><label>ΦΠΑ (€)</label><input id="r-vat-${i}" type="number" step="0.01" value="${d.vatAmount||""}"></div>
-        </div>
-        <label>Συντελεστής ΦΠΑ</label>
-        <select id="r-vatrate-${i}">
-          ${state.config.vatRates.map(r=>`<option value="${r}" ${Number(d.vatRate)===r?"selected":""}>${r}%</option>`).join("")}
-        </select>
+        <label>Ανάλυση ΦΠΑ ανά συντελεστή</label>
+        ${vatBlockHtml("r"+i, d, "r-gross-"+i)}
         <div style="background:#eef3ef;border:2px solid var(--accent);border-radius:10px;padding:8px 10px;margin-top:10px;">
           <label style="font-weight:800;color:var(--accent);margin:0 0 4px;font-size:13px;">Τρόπος πληρωμής *</label>
           <input type="hidden" id="r-paytype-${i}" value="${escapeHtml(d.paymentType||"")}">
@@ -1245,18 +1246,10 @@ function sheetAddInvoiceHtml(s){
     </div>
     <label>Διεύθυνση</label>
     <input id="f-address" value="${escapeHtml(d.address||"")}">
-    <div class="grid2">
-      <div><label>Καθαρή αξία (€)</label><input id="f-net" type="number" step="0.01" value="${d.netAmount||""}"></div>
-      <div><label>ΦΠΑ (€)</label><input id="f-vat" type="number" step="0.01" value="${d.vatAmount||""}"></div>
-    </div>
-    <div class="grid2">
-      <div><label>Συντελεστής ΦΠΑ</label>
-        <select id="f-vatrate">
-          ${state.config.vatRates.map(r=>`<option value="${r}" ${Number(d.vatRate)===r?"selected":""}>${r}%</option>`).join("")}
-        </select>
-      </div>
-      <div><label>Σύνολο (€)</label><input id="f-gross" type="number" step="0.01" value="${d.grossAmount||""}"></div>
-    </div>
+    <label>Ανάλυση ΦΠΑ ανά συντελεστή</label>
+    ${vatBlockHtml("f", d, "f-gross")}
+    <label>Σύνολο τιμολογίου (€)</label>
+    <input id="f-gross" type="number" step="0.01" value="${d.grossAmount||""}">
     <div style="height:12px"></div>
     <button class="btn" data-act="save-invoice">${dup && !s.dupConfirmed ? "Αποθήκευση όπως είναι (υπάρχει παρόμοιο)" : ((s.mode==="bulk" && s.index<s.queue.length-1) ? "Αποθήκευση & επόμενη φωτογραφία" : "Αποθήκευση τιμολογίου")}</button>
     <div style="height:8px"></div>
@@ -1313,6 +1306,78 @@ function sheetPinHtml(s){
 
 /* -------------------------------- Γενικός renderer sheet -------------------------------- */
 
+/* ---- Ανάλυση ΦΠΑ ανά συντελεστή (ένα τιμολόγιο μπορεί να έχει π.χ. 13% και 24%) ---- */
+function normBreakdown(d){
+  let b = Array.isArray(d && d.vatBreakdown) ? d.vatBreakdown.map(x=>({rate:Number(x.rate)||0, net:Number(x.net)||0, vat:Number(x.vat)||0})).filter(x=>x.net||x.vat) : [];
+  if(!b.length && d && (d.netAmount||d.vatAmount)) b = [{rate:Number(d.vatRate)||0, net:Number(d.netAmount)||0, vat:Number(d.vatAmount)||0}];
+  if(!b.length) b = [{rate:Number(state.config.vatRates[0])||0, net:0, vat:0}];
+  return b;
+}
+function vatRowHtml(r){
+  const rates = state.config.vatRates.slice();
+  if(!rates.includes(r.rate)) rates.push(r.rate);
+  const opts = rates.map(x=>`<option value="${x}" ${Number(r.rate)===x?"selected":""}>${x}%</option>`).join("");
+  return `<div class="vrow"><select class="vr-rate">${opts}</select>
+    <input class="vr-net" type="number" step="0.01" placeholder="Καθαρή" value="${r.net||""}">
+    <input class="vr-vat" type="number" step="0.01" placeholder="ΦΠΑ" value="${r.vat||""}">
+    <button type="button" class="vr-del" data-vr-act="del" title="Αφαίρεση">✕</button></div>`;
+}
+function vatBlockHtml(prefix, d, grossId){
+  const rows = normBreakdown(d).map(vatRowHtml).join("");
+  return `<div class="vatblock" id="${prefix}-vat" data-gross="${grossId}">
+    <div class="vhead"><span>Συντελεστής</span><span>Καθαρή αξία (€)</span><span>ΦΠΑ (€)</span><span></span></div>
+    <div class="vrows">${rows}</div>
+    <button type="button" class="btn secondary small" data-vr-act="add" data-prefix="${prefix}" style="margin-top:6px;">+ Άλλος συντελεστής ΦΠΑ</button>
+    <div class="vsum muted" style="margin-top:6px;font-size:12px;"></div>
+  </div>`;
+}
+function readBreakdown(prefix){
+  const box = document.getElementById(prefix+"-vat");
+  const rows = [];
+  if(box) box.querySelectorAll(".vrow").forEach(r=>{
+    const rate = Number(r.querySelector(".vr-rate").value)||0;
+    const net = Number(r.querySelector(".vr-net").value)||0;
+    const vat = Number(r.querySelector(".vr-vat").value)||0;
+    if(net||vat) rows.push({rate, net:Math.round(net*100)/100, vat:Math.round(vat*100)/100});
+  });
+  const net = Math.round(rows.reduce((a,x)=>a+x.net,0)*100)/100;
+  const vat = Math.round(rows.reduce((a,x)=>a+x.vat,0)*100)/100;
+  const main = rows.slice().sort((a,b)=>b.net-a.net)[0];
+  return {rows, net, vat, rate: main ? main.rate : 0};
+}
+function updateVatSum(box){
+  if(!box) return;
+  const prefix = box.id.replace(/-vat$/,"");
+  const b = readBreakdown(prefix);
+  const gEl = document.getElementById(box.getAttribute("data-gross"));
+  const gross = gEl ? Number(gEl.value)||0 : 0;
+  const sum = Math.round((b.net+b.vat)*100)/100;
+  const el = box.querySelector(".vsum");
+  let txt = "Σύνολο καθαρής: " + fmtMoney(b.net) + " · ΦΠΑ: " + fmtMoney(b.vat) + " · Άθροισμα: " + fmtMoney(sum);
+  el.style.color = "";
+  if(gross && Math.abs(sum-gross) > 0.02){ txt += " — δεν ταιριάζει με το σύνολο " + fmtMoney(gross) + ", έλεγξε τα ποσά"; el.style.color = "var(--bad)"; }
+  el.textContent = txt;
+}
+document.addEventListener("click", (e)=>{
+  const t = e.target.closest && e.target.closest("[data-vr-act]");
+  if(!t) return;
+  const box = t.closest(".vatblock");
+  if(t.getAttribute("data-vr-act")==="add" && box){
+    box.querySelector(".vrows").insertAdjacentHTML("beforeend", vatRowHtml({rate:Number(state.config.vatRates[0])||0, net:0, vat:0}));
+  } else if(t.getAttribute("data-vr-act")==="del" && box){
+    const rows = box.querySelectorAll(".vrow");
+    if(rows.length>1) t.closest(".vrow").remove(); else rows[0].querySelectorAll("input").forEach(i=>i.value="");
+  }
+  updateVatSum(box);
+});
+document.addEventListener("input", (e)=>{
+  const box = e.target.closest && e.target.closest(".vatblock");
+  if(box) { updateVatSum(box); return; }
+  if(e.target.id && /(^f-gross$|^r-gross-)/.test(e.target.id)){
+    document.querySelectorAll(".vatblock").forEach(b=>{ if(b.getAttribute("data-gross")===e.target.id) updateVatSum(b); });
+  }
+});
+
 function sheetInvoiceDetailHtml(s){
   const inv = allInvoices().find(x=>x.id===s.id);
   if(!inv) return `<h2>Τιμολόγιο</h2><div class="badbox">Δεν βρέθηκε το τιμολόγιο.</div><button class="btn secondary" data-act="close-sheet">Κλείσιμο</button>`;
@@ -1321,9 +1386,9 @@ function sheetInvoiceDetailHtml(s){
   <h2>${escapeHtml(inv.supplierName||"Τιμολόγιο")}</h2>
   <div class="muted" style="margin-bottom:8px;">${fmtDate(inv.date)} · ${inv.paymentType==='μετρητοίς'?'Μετρητοίς':'Επί πιστώσει'}${inv.who?(' · '+escapeHtml(inv.who)):''}</div>
   <div class="card" style="margin:0 0 10px;">
-    ${row("Καθαρή αξία", fmtMoney(inv.netAmount))}
-    ${row("ΦΠΑ "+(Number(inv.vatRate)||0)+"%", fmtMoney(inv.vatAmount))}
+    ${normBreakdown(inv).map(b=>row("Καθαρή αξία "+b.rate+"%", fmtMoney(b.net))+row("ΦΠΑ "+b.rate+"%", fmtMoney(b.vat))).join("")}
     <div class="divider"></div>
+    ${normBreakdown(inv).length>1 ? row("Σύνολο καθαρής", fmtMoney(inv.netAmount))+row("Σύνολο ΦΠΑ", fmtMoney(inv.vatAmount)) : ""}
     ${row("Σύνολο", fmtMoney(inv.grossAmount), true)}
   </div>
   ${inv.afm?`<div class="muted">ΑΦΜ: ${escapeHtml(inv.afm)}</div>`:""}
@@ -1344,6 +1409,7 @@ function renderSheet(){
   overlay.innerHTML = `<div class="sheet"><div class="sheet-handle"></div>${inner}</div>`;
   overlay.addEventListener("click", (e)=>{ if(e.target===overlay) closeSheet(); });
   document.body.appendChild(overlay);
+  overlay.querySelectorAll(".vatblock").forEach(updateVatSum);
 }
 
 function closeSheet(){
@@ -1654,9 +1720,7 @@ async function saveAllBulk(){
     const supplierEl = document.getElementById("r-supplier-"+i);
     const dateEl = document.getElementById("r-date-"+i);
     const grossEl = document.getElementById("r-gross-"+i);
-    const netEl = document.getElementById("r-net-"+i);
-    const vatEl = document.getElementById("r-vat-"+i);
-    const vatrateEl = document.getElementById("r-vatrate-"+i);
+    const bd = readBreakdown("r"+i);
     const paytypeEl = document.getElementById("r-paytype-"+i);
     const supplierName = supplierEl ? supplierEl.value.trim() : (row.extracted.supplierName||"");
     if(!supplierName) continue;
@@ -1668,9 +1732,10 @@ async function saveAllBulk(){
       phone: row.extracted.phone||"",
       email: row.extracted.email||"",
       address: row.extracted.address||"",
-      netAmount: Number(netEl ? netEl.value : row.extracted.netAmount)||0,
-      vatAmount: Number(vatEl ? vatEl.value : row.extracted.vatAmount)||0,
-      vatRate: Number(vatrateEl ? vatrateEl.value : row.extracted.vatRate)||0,
+      netAmount: bd.net,
+      vatAmount: bd.vat,
+      vatRate: bd.rate,
+      vatBreakdown: bd.rows,
       grossAmount: Number(grossEl ? grossEl.value : row.extracted.grossAmount)||0,
       paymentType: paytypeEl ? paytypeEl.value : "μετρητοίς",
       who: state.currentStaff || "",
@@ -1738,9 +1803,10 @@ async function saveInvoiceFromForm(){
     phone: document.getElementById("f-phone").value.trim(),
     email: document.getElementById("f-email").value.trim(),
     address: document.getElementById("f-address").value.trim(),
-    netAmount: Number(document.getElementById("f-net").value)||0,
-    vatAmount: Number(document.getElementById("f-vat").value)||0,
-    vatRate: Number(document.getElementById("f-vatrate").value)||0,
+    netAmount: readBreakdown("f").net,
+    vatAmount: readBreakdown("f").vat,
+    vatRate: readBreakdown("f").rate,
+    vatBreakdown: readBreakdown("f").rows,
     grossAmount: Number(document.getElementById("f-gross").value)||0,
     paymentType: document.getElementById("f-paytype").value,
     who: state.currentStaff || "",
@@ -1814,13 +1880,18 @@ async function savePaymentFromForm(key){
 function exportInvoicesToExcel(){
   const invoices = allInvoices();
   if(!invoices.length){ toast("Δεν υπάρχουν τιμολόγια για εξαγωγή."); return; }
+  const allRates = [...new Set(invoices.flatMap(inv=>normBreakdown(inv).filter(b=>b.net||b.vat).map(b=>b.rate)))].sort((a,b)=>a-b);
   const rows = invoices.map(inv=>({
     "Προμηθευτής": inv.supplierName,
     "ΑΦΜ": inv.afm||"",
     "Ημερομηνία": fmtDate(inv.date),
     "Καθαρή αξία": inv.netAmount||0,
     "ΦΠΑ": inv.vatAmount||0,
-    "Συντελεστής ΦΠΑ": inv.vatRate?inv.vatRate+"%":"",
+    "Συντελεστής ΦΠΑ": normBreakdown(inv).filter(b=>b.net||b.vat).map(b=>b.rate+"%").join(", "),
+    ...Object.fromEntries(allRates.flatMap(r=>{
+      const b = normBreakdown(inv).filter(x=>x.rate===r);
+      return [["Καθαρή "+r+"%", b.reduce((a,x)=>a+x.net,0)||""], ["ΦΠΑ "+r+"%", b.reduce((a,x)=>a+x.vat,0)||""]];
+    })),
     "Σύνολο": inv.grossAmount||0,
     "Τρόπος πληρωμής": inv.paymentType||"",
     "Καταχωρήθηκε από": inv.who||""
