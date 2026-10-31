@@ -135,7 +135,7 @@
    κλειδί OpenRouter (χωρίς κάρτα), όπως στο Identify-AI.
    ========================================================================= */
 
-const APP_VERSION = "1.11.2";
+const APP_VERSION = "1.11.3";
 const DEFAULT_PIN = "";   /* 25/10/2026: καμία προεπιλογή — ο κωδικός ορίζεται στο πρώτο άνοιγμα */
 const PIN_LEN = 6;
 /* Ο κωδικός διαχειριστή αποθηκεύεται ΜΟΝΟ ως αλατισμένο αποτύπωμα (PBKDF2), ποτέ σε απλό κείμενο.
@@ -161,7 +161,7 @@ const weakPin = (v) => /^(\d)\1+$/.test(v) || "0123456789".includes(v) || "98765
 const DEFAULT_MODEL = ""; // κενό = αυτόματη εύρεση δωρεάν μοντέλου με εικόνα
 const MODEL_LIST_CACHE_KEY = "tim_free_vision_models";
 const MODEL_LIST_MAX_AGE = 12 * 60 * 60 * 1000; // 12 ώρες
-const MODEL_TIMEOUT_MS = 22000;
+const MODEL_TIMEOUT_MS = 14000;
 
 /* ---------------------------- Εμφάνιση (θέμα) ---------------------------- */
 
@@ -501,8 +501,8 @@ async function fileToDataUrl(file){
    και κάποιες φορές την κάνουν να αποτυγχάνει. Κρατάει όλο το τιμολόγιο ορατό,
    απλά σε μικρότερο μέγεθος αρχείου. */
 async function resizeImageDataUrl(file, maxDim, quality){
-  maxDim = maxDim || 1600;
-  quality = quality || 0.82;
+  maxDim = maxDim || 1280;
+  quality = quality || 0.8;
   const original = await fileToDataUrl(file);
   try{
     const img = await new Promise((resolve,reject)=>{
@@ -706,10 +706,14 @@ async function extractInvoiceData(file, onProgress){
   const dataUrl = await resizeImageDataUrl(file);
   // Σειρά προσπαθειών: πρώτα Gemini (πιο γρήγορο/σίγουρο), μετά τα δωρεάν μοντέλα OpenRouter.
   const attempts = [];
-  if(gemKey) for(const m of GEMINI_MODELS) attempts.push({engine:"gemini", model:m});
+  if(gemKey){
+    const gl = state.config.lastWorkingGemini;
+    const order = gl && GEMINI_MODELS.includes(gl) ? [gl, ...GEMINI_MODELS.filter(x=>x!==gl)] : GEMINI_MODELS;
+    for(const m of order) attempts.push({engine:"gemini", model:m});
+  }
   if(orKey){
     const orModels = await candidateModels();
-    for(const m of orModels) attempts.push({engine:"openrouter", model:m});
+    for(const m of orModels.slice(0,4)) attempts.push({engine:"openrouter", model:m}); // μόνο τα 4 πρώτα — ο χρόνος χάνεται στα φορτωμένα
   }
   if(!attempts.length) throw new Error("Δεν βρέθηκε αυτή τη στιγμή κανένα διαθέσιμο μοντέλο με υποστήριξη εικόνας. Δοκίμασε ξανά σε λίγο.");
   let lastErr = null;
@@ -734,6 +738,7 @@ async function extractInvoiceData(file, onProgress){
         : await callOpenRouterVision(dataUrl, orKey, model);
       const parsed = parseJsonLoose(text);
       if(engine==="openrouter"){ state.config.lastWorkingModel = model; persistLocal(); }
+      else { state.config.lastWorkingGemini = model; persistLocal(); }
       return {parsed, dataUrl, modelUsed: model};
     }catch(e){
       lastErr = e;
