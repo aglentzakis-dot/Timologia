@@ -135,7 +135,7 @@
    κλειδί OpenRouter (χωρίς κάρτα), όπως στο Identify-AI.
    ========================================================================= */
 
-const APP_VERSION = "1.11.4";
+const APP_VERSION = "1.11.5";
 const DEFAULT_PIN = "";   /* 25/10/2026: καμία προεπιλογή — ο κωδικός ορίζεται στο πρώτο άνοιγμα */
 const PIN_LEN = 6;
 /* Ο κωδικός διαχειριστή αποθηκεύεται ΜΟΝΟ ως αλατισμένο αποτύπωμα (PBKDF2), ποτέ σε απλό κείμενο.
@@ -583,7 +583,33 @@ async function callOpenRouterVision(dataUrl, apiKey, model){
   }
 }
 
-const GEMINI_MODELS = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-2.5-flash-lite"];
+const GEMINI_MODELS = ["gemini-flash-latest", "gemini-flash-lite-latest"];
+
+/* Ρωτά τη Google ποια μοντέλα Gemini είναι διαθέσιμα στο δικό σου κλειδί και διαλέγει τα νεότερα flash. */
+async function getGeminiModels(apiKey){
+  try{
+    const cached = LS.get("tim_gemini_models", null);
+    if(cached && (Date.now()-cached.ts) < 6*3600*1000 && cached.key===apiKey.slice(-6) && cached.models?.length) return cached.models;
+  }catch(e){}
+  try{
+    const c = new AbortController(); const t = setTimeout(()=>c.abort(), 10000);
+    const r = await fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", {headers:{"x-goog-api-key":apiKey}, signal:c.signal});
+    clearTimeout(t);
+    if(!r.ok) return GEMINI_MODELS;
+    const data = await r.json();
+    const bad = /preview|exp|image|tts|audio|live|thinking|embed|aqa|learnlm|gemma|robotics|computer|vision-only/i;
+    const items = (data.models||[])
+      .filter(m=>(m.supportedGenerationMethods||[]).includes("generateContent"))
+      .map(m=>String(m.name||"").replace(/^models\//,""))
+      .filter(n=>/^gemini-[\d.]+-flash(-lite)?$/.test(n) && !bad.test(n))
+      .map(n=>({n, v:parseFloat(n.split("-")[1]), lite:/lite$/.test(n)}));
+    items.sort((a,b)=> (a.lite-b.lite) || (b.v-a.v));
+    let models = items.map(x=>x.n).slice(0,3);
+    if(!models.length) return GEMINI_MODELS;
+    LS.set("tim_gemini_models", {ts:Date.now(), key:apiKey.slice(-6), models});
+    return models;
+  }catch(e){ return GEMINI_MODELS; }
+}
 
 async function callGeminiVision(dataUrl, apiKey, model){
   const m = /^data:([^;]+);base64,(.*)$/.exec(dataUrl || "");
@@ -735,8 +761,9 @@ async function extractInvoiceData(file, onProgress){
   // Σειρά προσπαθειών: πρώτα Gemini (πιο γρήγορο/σίγουρο), μετά τα δωρεάν μοντέλα OpenRouter.
   const attempts = [];
   if(gemKey){
+    const live = await getGeminiModels(gemKey);
     const gl = state.config.lastWorkingGemini;
-    const order = gl && GEMINI_MODELS.includes(gl) ? [gl, ...GEMINI_MODELS.filter(x=>x!==gl)] : GEMINI_MODELS;
+    const order = gl && live.includes(gl) ? [gl, ...live.filter(x=>x!==gl)] : live;
     for(const m of order) attempts.push({engine:"gemini", model:m});
   }
   if(orKey){
