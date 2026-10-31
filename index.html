@@ -135,7 +135,7 @@
    κλειδί OpenRouter (χωρίς κάρτα), όπως στο Identify-AI.
    ========================================================================= */
 
-const APP_VERSION = "1.11.3";
+const APP_VERSION = "1.11.4";
 const DEFAULT_PIN = "";   /* 25/10/2026: καμία προεπιλογή — ο κωδικός ορίζεται στο πρώτο άνοιγμα */
 const PIN_LEN = 6;
 /* Ο κωδικός διαχειριστή αποθηκεύεται ΜΟΝΟ ως αλατισμένο αποτύπωμα (PBKDF2), ποτέ σε απλό κείμενο.
@@ -652,6 +652,34 @@ async function candidateModels(){
   return list;
 }
 
+/* Έλεγχος ενημέρωσης: μένει στην ίδια σελίδα και λέει καθαρά τι βρήκε. */
+async function checkForUpdate(){
+  const st = document.getElementById("upd-status");
+  const ap = document.getElementById("upd-apply");
+  const say = (cls, txt)=>{ if(st){ st.className = "keystatus " + cls; st.textContent = txt; } };
+  if(ap) ap.innerHTML = "";
+  say("wait", "Έλεγχος…");
+  try{
+    const r = await fetch(location.pathname + "?chk=" + Date.now(), {cache:"no-store"});
+    if(!r.ok) throw new Error("HTTP " + r.status);
+    const t = await r.text();
+    const m = /const APP_VERSION = "([^"]+)"/.exec(t);
+    if(!m) throw new Error("δεν βρέθηκε αριθμός έκδοσης");
+    const latest = m[1];
+    const cmp = (a,b)=>{ const x=a.split(".").map(Number), y=b.split(".").map(Number);
+      for(let i=0;i<3;i++){ if((x[i]||0)!==(y[i]||0)) return (x[i]||0)>(y[i]||0)?1:-1; } return 0; };
+    if(cmp(latest, APP_VERSION) > 0){
+      say("bad", "Υπάρχει νέα έκδοση: " + latest + " (εσύ έχεις " + APP_VERSION + ")");
+      if(ap) ap.innerHTML = `<button class="btn small" data-act="apply-update">Ενημέρωση τώρα</button>`;
+      bindEvents();
+    } else {
+      say("ok", "✔ Έχεις την τελευταία έκδοση (" + APP_VERSION + ")");
+    }
+  }catch(e){
+    say("bad", "Δεν έγινε έλεγχος — " + ((e && e.message) || "πρόβλημα σύνδεσης"));
+  }
+}
+
 /* Έλεγχος κλειδιών: πράσινη ένδειξη αν δουλεύουν, κόκκινη αν όχι. */
 const keyStatus = {gemini:null, or:null};
 function paintKeyStatus(){
@@ -1019,6 +1047,8 @@ function renderSettingsScreen(){
     <div class="muted">Έκδοση ${APP_VERSION}</div>
     <div style="height:8px"></div>
     <button class="btn secondary small" data-act="check-update">Έλεγχος για ενημέρωση</button>
+    <div id="upd-status" class="keystatus"></div>
+    <div id="upd-apply" style="margin-top:8px;"></div>
   </div>`;
 }
 
@@ -1482,7 +1512,8 @@ async function handleAction(act, el){
       }catch(e){ toast("Αποτυχία ελέγχου: " + (e.message||e)); }
       break;
     case "export-excel": exportInvoicesToExcel(); break;
-    case "check-update": location.href = location.pathname + "?v=" + Date.now(); break;
+    case "check-update": await checkForUpdate(); break;
+    case "apply-update": location.href = location.pathname + "?v=" + Date.now(); break;
     case "manual-entry":
       state.sheet.step = "confirm"; state.sheet.extracted = {date: todayISO()}; state.sheet.dataUrl = state.sheet.dataUrl||null; render(); break;
     case "retry-capture":
