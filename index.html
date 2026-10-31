@@ -135,7 +135,7 @@
    κλειδί OpenRouter (χωρίς κάρτα), όπως στο Identify-AI.
    ========================================================================= */
 
-const APP_VERSION = "1.11.0";
+const APP_VERSION = "1.11.1";
 const DEFAULT_PIN = "";   /* 25/10/2026: καμία προεπιλογή — ο κωδικός ορίζεται στο πρώτο άνοιγμα */
 const PIN_LEN = 6;
 /* Ο κωδικός διαχειριστή αποθηκεύεται ΜΟΝΟ ως αλατισμένο αποτύπωμα (PBKDF2), ποτέ σε απλό κείμενο.
@@ -713,6 +713,15 @@ async function extractInvoiceData(file, onProgress){
   }
   if(!attempts.length) throw new Error("Δεν βρέθηκε αυτή τη στιγμή κανένα διαθέσιμο μοντέλο με υποστήριξη εικόνας. Δοκίμασε ξανά σε λίγο.");
   let lastErr = null;
+  const errs = {gemini:null, openrouter:null, orCount:0};
+  const shortErr = (e)=>{
+    if(e && e.name==="AbortError") return "άργησε πολύ";
+    const m = String((e && e.message) || e || "άγνωστο");
+    if(/Failed to fetch|NetworkError|Load failed/i.test(m)) return "δεν έγινε σύνδεση (δίκτυο ή αποκλεισμός από τον browser)";
+    if(/HTTP 429|rate-limited|RESOURCE_EXHAUSTED/i.test(m)) return "όριο χρήσης — πολλές αιτήσεις, δοκίμασε σε λίγο";
+    if(/HTTP 40[13]|API key|PERMISSION_DENIED/i.test(m)) return "το κλειδί δεν γίνεται δεκτό";
+    return m.slice(0,140);
+  };
   for(let i=0;i<attempts.length;i++){
     const {engine, model} = attempts[i];
     if(onProgress) onProgress(i+1, attempts.length, (engine==="gemini" ? "Gemini · " : "") + model);
@@ -724,10 +733,17 @@ async function extractInvoiceData(file, onProgress){
       if(engine==="openrouter"){ state.config.lastWorkingModel = model; persistLocal(); }
       return {parsed, dataUrl, modelUsed: model};
     }catch(e){
-      lastErr = (e && e.name === "AbortError") ? new Error("Το μοντέλο «" + model + "» άργησε πολύ και ακυρώθηκε.") : e;
+      lastErr = e;
+      if(engine==="gemini"){ if(!errs.gemini) errs.gemini = shortErr(e); }
+      else { errs.openrouter = shortErr(e); errs.orCount++; }
+      // Όριο χρήσης στο Gemini: μία σύντομη αναμονή πριν δοκιμάσουμε το επόμενο
+      if(engine==="gemini" && /HTTP 429/.test(String(e&&e.message))) await new Promise(r=>setTimeout(r,2500));
     }
   }
-  throw lastErr || new Error("Αποτυχία εξαγωγής δεδομένων.");
+  const parts = [];
+  if(gemKey) parts.push("Gemini: " + (errs.gemini || "δεν απάντησε"));
+  if(orKey) parts.push("OpenRouter (" + errs.orCount + " μοντέλα): " + (errs.openrouter || "δεν απάντησε"));
+  throw new Error(parts.join(" — ") || "Αποτυχία εξαγωγής δεδομένων.");
 }
 
 /* ============================= UI ============================= */
@@ -1525,6 +1541,7 @@ async function processBulkAll(){
     s.progress = null;
     render();
     const row = s.results[i];
+    if(i>0 && state.config.geminiKey) await new Promise(r=>setTimeout(r,1500)); // να μη φτάσουμε το όριο αιτήσεων
     try{
       const {parsed, dataUrl} = await extractInvoiceData(row.file, (a,b,model)=>{
         if(state.sheet && state.sheet.step==="processing"){ state.sheet.progress = {i:a,n:b,model}; render(); }
