@@ -42,7 +42,7 @@
     card.appendChild(el("div",{fontSize:"18px",fontWeight:"800",marginBottom:"8px"},"📦 Μεταφορά στοιχείων · "+onoma));
     msg=el("div",{fontSize:"15px",whiteSpace:"pre-line"});card.appendChild(msg);
     btns=el("div",{display:"flex",gap:"8px",marginTop:"16px",flexWrap:"wrap"});card.appendChild(btns);
-    box.appendChild(card);(document.body||document.documentElement).appendChild(box)}
+    box.setAttribute("translate","no");box.className="notranslate";box.appendChild(card);(document.body||document.documentElement).appendChild(box)}
   function say(t){ui();msg.textContent=t}
   function btn(t,main,fn){var b=el("button",{flex:"1",minWidth:"120px",padding:"12px",borderRadius:"10px",border:main?"0":"1px solid #c9d2dc",background:main?"#F2B632":"#fff",color:"#1B2E45",fontSize:"15px",fontWeight:"700",cursor:"pointer"},t);b.type="button";b.onclick=fn;btns.appendChild(b);return b}
   function clearBtns(){if(btns)btns.textContent=""}
@@ -64,8 +64,11 @@
   function mkStores(db,tx,stores){stores.forEach(function(s){var st;if(!db.objectStoreNames.contains(s.name)){var o={};if(s.keyPath!=null)o.keyPath=s.keyPath;if(s.autoIncrement)o.autoIncrement=true;st=db.createObjectStore(s.name,o)}else st=tx.objectStore(s.name);
     (s.indexes||[]).forEach(function(i){if(!st.indexNames.contains(i.name))st.createIndex(i.name,i.keyPath,{unique:!!i.unique,multiEntry:!!i.multiEntry})})})}
   async function idbWrite(){var pire=[];
-    for(var name in IN.idb){var x=IN.idb[name],db=await idbOpen(name);var missing=x.stores.some(function(s){return!db.objectStoreNames.contains(s.name)});
-      if(missing||db.version<x.version){var v=Math.max(db.version+(missing?1:0),x.version);db.close();db=await idbOpen(name,v,function(d,tx){mkStores(d,tx,x.stores)})}
+    for(var name in IN.idb){var x=IN.idb[name],up=function(d,tx){mkStores(d,tx,x.stores)},db;
+      // ανοίγει ΠΡΩΤΑ στην ίδια έκδοση με την παλιά βάση (αλλιώς μια νέα βάση γινόταν έκδοση 2 και η εφαρμογή που ανοίγει με open(όνομα,1) δεν τη διάβαζε)
+      try{db=await idbOpen(name,x.version,up)}catch(e){if(!e||e.name!=="VersionError")throw e;db=await idbOpen(name)}
+      var missing=x.stores.some(function(s){return!db.objectStoreNames.contains(s.name)});
+      if(missing){var v=db.version+1;db.close();db=await idbOpen(name,v,up)}
       for(var s in x.recs){var info=x.stores.filter(function(z){return z.name===s})[0]||{};var recs=x.recs[s];
         for(var i=0;i<recs.length;i+=200){var part=recs.slice(i,i+200);
           await new Promise(function(res,rej){var t=db.transaction(s,"readwrite"),o=t.objectStore(s);part.forEach(function(kv){if(info.keyPath!=null)o.put(kv[1]);else o.put(kv[1],kv[0])});t.oncomplete=res;t.onerror=function(){rej(t.error)};t.onabort=function(){rej(t.error||new Error("abort"))}})}}
