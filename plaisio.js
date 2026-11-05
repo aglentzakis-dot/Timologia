@@ -9,3 +9,6 @@
   document.documentElement.style.display = "none";
   try { window.top.location.replace(window.location.href); } catch (e) {}
 })();
+
+/* Ζητά από τον περιηγητή να μη σβήνει μόνος του τα δεδομένα της εφαρμογής (π.χ. όταν γεμίζει η συσκευή) — 6/11/2026. */
+(function(){try{var s=navigator.storage;if(s&&s.persist&&s.persisted){s.persisted().then(function(p){if(!p)return s.persist();}).catch(function(){});}}catch(e){}})();
